@@ -63,11 +63,15 @@ public class AppSyncService {
         if (name == null || name.isBlank()) {
             throw new AwsException("BadRequestException", "A GraphQL API name is required", 400);
         }
+        String authType = (String) request.get("authenticationType");
+        if (authType == null || authType.isBlank()) {
+            throw new AwsException("BadRequestException", "The authenticationType is required", 400);
+        }
         String apiId = generateApiId();
         GraphqlApi api = new GraphqlApi();
         api.setApiId(apiId);
         api.setName(name);
-        api.setAuthenticationType(parseEnum(AuthenticationType.class, request.get("authenticationType")));
+        api.setAuthenticationType(parseEnum(AuthenticationType.class, authType));
         Object xrayValue = request.get("xrayEnabled");
         if (xrayValue instanceof Boolean b) {
             api.setXrayEnabled(b);
@@ -111,7 +115,7 @@ public class AppSyncService {
         Map<String, Object> tags = castMap(request.get("tags"));
         if (tags != null) {
             Map<String, String> tagMap = new HashMap<>();
-            tags.forEach((k, v) -> tagMap.put(k, String.valueOf(v)));
+            tags.forEach((k, v) -> tagMap.put(k, v != null ? String.valueOf(v) : ""));
             api.setTags(tagMap);
         }
 
@@ -146,7 +150,7 @@ public class AppSyncService {
         if (request.containsKey("tags")) {
             Map<String, Object> tags = (Map<String, Object>) request.get("tags");
             Map<String, String> tagMap = new HashMap<>();
-            tags.forEach((k, v) -> tagMap.put(k, String.valueOf(v)));
+            tags.forEach((k, v) -> tagMap.put(k, v != null ? String.valueOf(v) : ""));
             existing.setTags(tagMap);
         }
         if (request.containsKey("apiType")) existing.setApiType((String) request.get("apiType"));
@@ -214,7 +218,9 @@ public class AppSyncService {
 
     public String getIntrospectionSchema(String apiId) {
         getGraphqlApi(apiId);
-        return schemaStore.get(apiId).orElse(null);
+        return schemaStore.get(apiId)
+                .orElseThrow(() -> new AwsException("NotFoundException",
+                        "Schema not found for API: " + apiId, 404));
     }
 
     // ──────────────────────────── Data Sources ────────────────────────────
@@ -242,7 +248,11 @@ public class AppSyncService {
         ds.setAmazonBedrockRuntimeConfig(castMap(request.get("amazonBedrockRuntimeConfig")));
         ds.setDataSourceArn(regionResolver.buildArn("appsync", region, "apis/" + apiId + "/datasources/" + name));
 
-        dataSourceStore.put(apiKey(apiId, ds.getName()), ds);
+        String dsKey = apiKey(apiId, ds.getName());
+        if (dataSourceStore.get(dsKey).isPresent()) {
+            throw new AwsException("ConflictException", "Data source already exists: " + name, 409);
+        }
+        dataSourceStore.put(dsKey, ds);
         return ds;
     }
 
@@ -290,6 +300,11 @@ public class AppSyncService {
             throw new AwsException("BadRequestException", "A data source name is required for the resolver", 400);
         }
         String typeName = (String) request.get("typeName");
+        if (typeName == null || typeName.isBlank()) {
+            throw new AwsException("BadRequestException", "A type name is required for the resolver", 400);
+        }
+        // Validate data source exists
+        getDataSource(apiId, dataSourceName);
         Resolver resolver = new Resolver();
         resolver.setApiId(apiId);
         resolver.setTypeName(typeName);
@@ -317,6 +332,10 @@ public class AppSyncService {
         }
 
         String key = resolverKey(apiId, resolver.getTypeName(), resolver.getFieldName());
+        if (resolverStore.get(key).isPresent()) {
+            throw new AwsException("ConflictException",
+                "Resolver already exists for " + typeName + "." + fieldName, 409);
+        }
         resolverStore.put(key, resolver);
         return resolver;
     }
@@ -384,11 +403,15 @@ public class AppSyncService {
         if (name == null || name.isBlank()) {
             throw new AwsException("BadRequestException", "A function name is required", 400);
         }
+        String dsName = (String) request.get("dataSourceName");
+        if (dsName != null && !dsName.isBlank()) {
+            getDataSource(apiId, dsName);
+        }
         FunctionConfiguration fn = new FunctionConfiguration();
         fn.setFunctionId(generateShortId());
         fn.setName((String) request.get("name"));
         fn.setDescription((String) request.get("description"));
-        fn.setDataSourceName((String) request.get("dataSourceName"));
+        fn.setDataSourceName(dsName);
         fn.setRequestMappingTemplate((String) request.get("requestMappingTemplate"));
         fn.setResponseMappingTemplate((String) request.get("responseMappingTemplate"));
         fn.setFunctionVersion((String) request.getOrDefault("functionVersion", "2018-05-29"));
@@ -438,6 +461,10 @@ public class AppSyncService {
         if (name == null || name.isBlank()) {
             throw new AwsException("BadRequestException", "A type name is required", 400);
         }
+        String typeKey = apiKey(apiId, name);
+        if (typeStore.get(typeKey).isPresent()) {
+            throw new AwsException("ConflictException", "Type already exists: " + name, 409);
+        }
         AppSyncType type = new AppSyncType();
         type.setApiId(apiId);
         type.setName(name);
@@ -445,7 +472,7 @@ public class AppSyncService {
         type.setDescription((String) request.get("description"));
         type.setFormat(parseEnum(TypeFormat.class, request.getOrDefault("format", "SDL")));
 
-        typeStore.put(apiKey(apiId, type.getName()), type);
+        typeStore.put(typeKey, type);
         return type;
     }
 
@@ -476,6 +503,11 @@ public class AppSyncService {
 
     public ApiKey createApiKey(String apiId, Map<String, Object> request) {
         getGraphqlApi(apiId);
+        long existingCount = apiKeyStore.scan(k -> k.startsWith(apiId + "::")).size();
+        if (existingCount >= 2) {
+            throw new AwsException("LimitExceededException",
+                "Maximum of 2 API keys per API reached", 429);
+        }
         ApiKey key = new ApiKey();
         key.setId(generateShortId());
         key.setApiId(apiId);
@@ -489,7 +521,12 @@ public class AppSyncService {
             try {
                 key.setExpires(Long.parseLong(s));
             } catch (NumberFormatException e) {
-                key.setExpires(null);
+                try {
+                    key.setExpires(java.time.Instant.parse(s).getEpochSecond());
+                } catch (java.time.format.DateTimeParseException ex) {
+                    throw new AwsException("BadRequestException",
+                        "Invalid expires value: " + s + ". Expected epoch seconds or ISO 8601.", 400);
+                }
             }
         }
 
@@ -521,7 +558,12 @@ public class AppSyncService {
                 try {
                     existing.setExpires(Long.parseLong(s));
                 } catch (NumberFormatException e) {
-                    // keep existing
+                    try {
+                        existing.setExpires(java.time.Instant.parse(s).getEpochSecond());
+                    } catch (java.time.format.DateTimeParseException ex) {
+                        throw new AwsException("BadRequestException",
+                            "Invalid expires value: " + s + ". Expected epoch seconds or ISO 8601.", 400);
+                    }
                 }
             }
         }
@@ -626,6 +668,10 @@ public class AppSyncService {
     public void associateApi(String domainName, String apiId) {
         getDomainName(domainName);
         getGraphqlApi(apiId);
+        if (associationStore.get(domainName).isPresent()) {
+            throw new AwsException("ConflictException",
+                "Domain name already associated with an API", 409);
+        }
         associationStore.put(domainName, apiId);
     }
 
@@ -669,11 +715,16 @@ public class AppSyncService {
         if (name == null || name.isBlank()) {
             throw new AwsException("BadRequestException", "A channel namespace name is required", 400);
         }
+        String nsKey = apiKey(apiId, name);
+        if (channelNamespaceStore.get(nsKey).isPresent()) {
+            throw new AwsException("ConflictException",
+                "Channel namespace already exists: " + name, 409);
+        }
         ChannelNamespace ns = new ChannelNamespace();
         ns.setName(name);
         ns.setApiId(apiId);
         ns.setDescription((String) request.get("description"));
-        channelNamespaceStore.put(apiKey(apiId, name), ns);
+        channelNamespaceStore.put(nsKey, ns);
         return ns;
     }
 
@@ -714,6 +765,12 @@ public class AppSyncService {
             throw new AwsException("BadRequestException", "A source API ID is required", 400);
         }
         getGraphqlApi(sourceApiId);
+        boolean exists = mergedApiAssociationStore.scan(k -> true).stream()
+            .anyMatch(a -> apiId.equals(a.getApiId()) && sourceApiId.equals(a.getSourceApiId()));
+        if (exists) {
+            throw new AwsException("ConflictException",
+                "Association already exists between APIs " + apiId + " and " + sourceApiId, 409);
+        }
         ApiAssociation assoc = new ApiAssociation();
         assoc.setAssociationId(generateShortId());
         assoc.setApiId(apiId);
@@ -795,11 +852,24 @@ public class AppSyncService {
     private Integer castInt(Object value) {
         if (value == null) return null;
         if (value instanceof Integer i) return i;
-        if (value instanceof Number n) return n.intValue();
+        if (value instanceof Number n) {
+            long longVal = n.longValue();
+            if (longVal < Integer.MIN_VALUE || longVal > Integer.MAX_VALUE) {
+                throw new AwsException("BadRequestException",
+                    "Integer value out of range: " + longVal, 400);
+            }
+            return n.intValue();
+        }
         try {
-            return Integer.parseInt(value.toString());
+            long longVal = Long.parseLong(value.toString());
+            if (longVal < Integer.MIN_VALUE || longVal > Integer.MAX_VALUE) {
+                throw new AwsException("BadRequestException",
+                    "Integer value out of range: " + longVal, 400);
+            }
+            return (int) longVal;
         } catch (NumberFormatException e) {
-            return null;
+            throw new AwsException("BadRequestException",
+                "Invalid integer value: " + value, 400);
         }
     }
 
@@ -880,7 +950,14 @@ public class AppSyncService {
     static <T> Page<T> paginate(List<T> items, String nextToken, Integer maxResults) {
         int start = decodeToken(nextToken);
         if (start < 0 || start > items.size()) {
-            throw new AwsException("InvalidNextTokenException", "Invalid NextToken.", 400);
+            throw new AwsException("BadRequestException", "Invalid NextToken.", 400);
+        }
+        if (maxResults != null && maxResults < 0) {
+            throw new AwsException("BadRequestException", "maxResults must be non-negative", 400);
+        }
+        if (maxResults != null && maxResults == 0) {
+            String next = (start < items.size()) ? encodeToken(start) : null;
+            return new Page<>(List.of(), next);
         }
         int limit = (maxResults == null || maxResults <= 0)
                 ? items.size()
@@ -910,10 +987,19 @@ public class AppSyncService {
 
     static String extractTypeNameFromDefinition(String definition) {
         if (definition == null || definition.isBlank()) return null;
-        String trimmed = definition.strip();
+        // Remove comments
+        String cleaned = definition.replaceAll("#[^\n]*", "");
+        String trimmed = cleaned.strip();
         String[] parts = trimmed.split("\\s+");
         if (parts.length >= 2) {
-            return parts[1].replaceAll("[{(].*", "");
+            String name = parts[1].replaceAll("[{(].*", "");
+            if (!name.isEmpty() && !name.startsWith("#")) return name;
+        }
+        // Try next word if first was a comment artifact
+        for (String part : parts) {
+            if (!part.isEmpty() && !part.startsWith("#") && !part.equals("type") && !part.equals("input") && !part.equals("enum")) {
+                return part.replaceAll("[{(].*", "");
+            }
         }
         return null;
     }
