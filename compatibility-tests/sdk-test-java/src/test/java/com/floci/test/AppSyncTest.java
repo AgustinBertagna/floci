@@ -487,6 +487,67 @@ class AppSyncTest {
         assertThat(resp).isNotNull();
     }
 
+    // ── Phase 2: Model Compatibility ───────────────────────────────────
+
+    @Test
+    @Order(90)
+    void createDataSource_hasDataSourceArn() {
+        CreateDataSourceResponse resp = client.createDataSource(CreateDataSourceRequest.builder()
+                .apiId(apiId)
+                .name("arn-check-ds")
+                .type("NONE")
+                .build());
+
+        assertThat(resp.dataSource().dataSourceArn()).isNotNull();
+        assertThat(resp.dataSource().dataSourceArn()).contains("arn:aws:appsync:");
+        assertThat(resp.dataSource().dataSourceArn()).contains("/datasources/arn-check-ds");
+
+        client.deleteDataSource(r -> r.apiId(apiId).name("arn-check-ds"));
+    }
+
+    @Test
+    @Order(91)
+    void createResolver_hasResolverArn() {
+        CreateResolverResponse resp = client.createResolver(CreateResolverRequest.builder()
+                .apiId(apiId)
+                .typeName("Query")
+                .fieldName("resolverArnCheck")
+                .dataSourceName("none-ds")
+                .build());
+
+        assertThat(resp.resolver().resolverArn()).isNotNull();
+        assertThat(resp.resolver().resolverArn()).contains("arn:aws:appsync:");
+        assertThat(resp.resolver().resolverArn()).contains("/types/Query/resolvers/resolverArnCheck");
+
+        client.deleteResolver(r -> r.apiId(apiId).typeName("Query").fieldName("resolverArnCheck"));
+    }
+
+    @Test
+    @Order(92)
+    void createFunction_hasFunctionArn() {
+        CreateFunctionResponse resp = client.createFunction(CreateFunctionRequest.builder()
+                .apiId(apiId)
+                .name("arn-check-fn")
+                .dataSourceName("none-ds")
+                .build());
+
+        assertThat(resp.functionConfiguration().functionArn()).isNotNull();
+        assertThat(resp.functionConfiguration().functionArn()).contains("arn:aws:appsync:");
+
+        client.deleteFunction(r -> r.apiId(apiId).functionId(resp.functionConfiguration().functionId()));
+    }
+
+    @Test
+    @Order(93)
+    void startSchemaCreation_invalidSchema() {
+        assertThatThrownBy(() -> client.startSchemaCreation(StartSchemaCreationRequest.builder()
+                        .apiId(apiId)
+                        .definition(SdkBytes.fromUtf8String("type Query { invalid !!! }"))
+                        .build()))
+                .isInstanceOf(AppSyncException.class)
+                .hasMessageContaining("Invalid schema");
+    }
+
     // ── Error Handling ─────────────────────────────────────────────────
 
     @Test
