@@ -53,8 +53,13 @@ public class AppSyncSchemaParser {
         Set<String> known = Set.of("skip", "include", "deprecated",
             "aws_api_key", "aws_iam", "aws_cognito_user_pools", "aws_oidc",
             "aws_lambda", "aws_subscribe", "aws_auth", "aws_delta_sync");
+        // Strip string literals and comments before checking for unknown directives
+        String clean = sdl
+            .replaceAll("\"\"\"[\\s\\S]*?\"\"\"", "") // block strings
+            .replaceAll("\"(?:[^\"\\\\]|\\\\.)*\"", "") // line strings
+            .replaceAll("#[^\n]*", "");                // comments
         Pattern directivePattern = Pattern.compile("@(\\w+)");
-        Matcher matcher = directivePattern.matcher(sdl);
+        Matcher matcher = directivePattern.matcher(clean);
         while (matcher.find()) {
             String name = matcher.group(1);
             if (!known.contains(name)) {
