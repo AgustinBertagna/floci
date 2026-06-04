@@ -62,8 +62,8 @@ public class AppSyncController {
     @POST
     @Path("/v1/apis/{apiId}")
     public Response updateGraphqlApi(@Context HttpHeaders headers,
-                                     @PathParam("apiId") String apiId,
-                                     String body) throws IOException {
+                                      @PathParam("apiId") String apiId,
+                                      String body) throws IOException {
         String region = regionResolver.resolveRegion(headers);
         @SuppressWarnings("unchecked")
         Map<String, Object> request = objectMapper.readValue(body, Map.class);
@@ -128,7 +128,9 @@ public class AppSyncController {
     public Response getIntrospectionSchema(@PathParam("apiId") String apiId) {
         String schema = service.getIntrospectionSchema(apiId);
         ObjectNode root = objectMapper.createObjectNode();
-        root.put("schema", schema);
+        ObjectNode schemaNode = objectMapper.createObjectNode();
+        schemaNode.put("definition", schema);
+        root.set("schema", schemaNode);
         return Response.ok(root).build();
     }
 
@@ -136,10 +138,13 @@ public class AppSyncController {
 
     @POST
     @Path("/v1/apis/{apiId}/datasources")
-    public Response createDataSource(@PathParam("apiId") String apiId, String body) throws IOException {
+    public Response createDataSource(@Context HttpHeaders headers,
+                                      @PathParam("apiId") String apiId,
+                                      String body) throws IOException {
+        String region = regionResolver.resolveRegion(headers);
         @SuppressWarnings("unchecked")
         Map<String, Object> request = objectMapper.readValue(body, Map.class);
-        DataSource ds = service.createDataSource(apiId, request);
+        DataSource ds = service.createDataSource(apiId, request, region);
         ObjectNode root = objectMapper.createObjectNode();
         root.set("dataSource", objectMapper.valueToTree(ds));
         return Response.status(200).entity(root).build();
@@ -157,8 +162,8 @@ public class AppSyncController {
     @POST
     @Path("/v1/apis/{apiId}/datasources/{name}")
     public Response updateDataSource(@PathParam("apiId") String apiId,
-                                     @PathParam("name") String name,
-                                     String body) throws IOException {
+                                      @PathParam("name") String name,
+                                      String body) throws IOException {
         @SuppressWarnings("unchecked")
         Map<String, Object> request = objectMapper.readValue(body, Map.class);
         DataSource ds = service.updateDataSource(apiId, name, request);
@@ -170,7 +175,7 @@ public class AppSyncController {
     @DELETE
     @Path("/v1/apis/{apiId}/datasources/{name}")
     public Response deleteDataSource(@PathParam("apiId") String apiId,
-                                     @PathParam("name") String name) {
+                                      @PathParam("name") String name) {
         service.deleteDataSource(apiId, name);
         return Response.noContent().build();
     }
@@ -196,13 +201,15 @@ public class AppSyncController {
 
     @POST
     @Path("/v1/apis/{apiId}/types/{typeName}/resolvers")
-    public Response createResolver(@PathParam("apiId") String apiId,
-                                   @PathParam("typeName") String typeName,
-                                   String body) throws IOException {
+    public Response createResolver(@Context HttpHeaders headers,
+                                    @PathParam("apiId") String apiId,
+                                    @PathParam("typeName") String typeName,
+                                    String body) throws IOException {
+        String region = regionResolver.resolveRegion(headers);
         @SuppressWarnings("unchecked")
         Map<String, Object> request = objectMapper.readValue(body, Map.class);
         request.put("typeName", typeName);
-        Resolver resolver = service.createResolver(apiId, request);
+        Resolver resolver = service.createResolver(apiId, request, region);
         ObjectNode root = objectMapper.createObjectNode();
         root.set("resolver", objectMapper.valueToTree(resolver));
         return Response.status(200).entity(root).build();
@@ -257,9 +264,9 @@ public class AppSyncController {
     @POST
     @Path("/v1/apis/{apiId}/types/{typeName}/resolvers/{fieldName}")
     public Response updateResolver(@PathParam("apiId") String apiId,
-                                   @PathParam("typeName") String typeName,
-                                   @PathParam("fieldName") String fieldName,
-                                   String body) throws IOException {
+                                    @PathParam("typeName") String typeName,
+                                    @PathParam("fieldName") String fieldName,
+                                    String body) throws IOException {
         @SuppressWarnings("unchecked")
         Map<String, Object> request = objectMapper.readValue(body, Map.class);
         Resolver resolver = service.updateResolver(apiId, typeName, fieldName, request);
@@ -271,8 +278,8 @@ public class AppSyncController {
     @DELETE
     @Path("/v1/apis/{apiId}/types/{typeName}/resolvers/{fieldName}")
     public Response deleteResolver(@PathParam("apiId") String apiId,
-                                   @PathParam("typeName") String typeName,
-                                   @PathParam("fieldName") String fieldName) {
+                                    @PathParam("typeName") String typeName,
+                                    @PathParam("fieldName") String fieldName) {
         service.deleteResolver(apiId, typeName, fieldName);
         return Response.noContent().build();
     }
@@ -537,4 +544,232 @@ public class AppSyncController {
         return Response.ok(root).build();
     }
 
+    // ──────────────────────────── Domain Names ────────────────────────────
+
+    @POST
+    @Path("/v1/domainnames")
+    public Response createDomainName(String body) throws IOException {
+        @SuppressWarnings("unchecked")
+        Map<String, Object> request = objectMapper.readValue(body, Map.class);
+        DomainName dn = service.createDomainName(request);
+        ObjectNode root = objectMapper.createObjectNode();
+        root.set("domainNameConfig", objectMapper.valueToTree(dn));
+        return Response.status(200).entity(root).build();
+    }
+
+    @GET
+    @Path("/v1/domainnames/{domainName}")
+    public Response getDomainName(@PathParam("domainName") String domainName) {
+        DomainName dn = service.getDomainName(domainName);
+        ObjectNode root = objectMapper.createObjectNode();
+        root.set("domainNameConfig", objectMapper.valueToTree(dn));
+        return Response.ok(root).build();
+    }
+
+    @GET
+    @Path("/v1/domainnames")
+    public Response listDomainNames(@QueryParam("maxResults") Integer maxResults,
+                                    @QueryParam("nextToken") String nextToken) {
+        var page = service.listDomainNames(maxResults, nextToken);
+        ObjectNode root = objectMapper.createObjectNode();
+        ArrayNode items = root.putArray("domainNames");
+        page.items().forEach(items::addPOJO);
+        if (page.nextToken() != null) {
+            root.put("nextToken", page.nextToken());
+        } else {
+            root.putNull("nextToken");
+        }
+        return Response.ok(root).build();
+    }
+
+    @POST
+    @Path("/v1/domainnames/{domainName}")
+    public Response updateDomainName(@PathParam("domainName") String domainName,
+                                      String body) throws IOException {
+        @SuppressWarnings("unchecked")
+        Map<String, Object> request = objectMapper.readValue(body, Map.class);
+        DomainName dn = service.updateDomainName(domainName, request);
+        ObjectNode root = objectMapper.createObjectNode();
+        root.set("domainNameConfig", objectMapper.valueToTree(dn));
+        return Response.ok(root).build();
+    }
+
+    @DELETE
+    @Path("/v1/domainnames/{domainName}")
+    public Response deleteDomainName(@PathParam("domainName") String domainName) {
+        service.deleteDomainName(domainName);
+        return Response.noContent().build();
+    }
+
+    @POST
+    @Path("/v1/domainnames/{domainName}/apis")
+    public Response associateApi(@PathParam("domainName") String domainName, String body) throws IOException {
+        @SuppressWarnings("unchecked")
+        Map<String, Object> request = objectMapper.readValue(body, Map.class);
+        String apiId = (String) request.get("apiId");
+        service.associateApi(domainName, apiId);
+        ObjectNode root = objectMapper.createObjectNode();
+        ObjectNode assoc = root.putObject("apiAssociation");
+        assoc.put("domainName", domainName);
+        assoc.put("apiId", apiId);
+        return Response.status(200).entity(root).build();
+    }
+
+    @GET
+    @Path("/v1/domainnames/{domainName}/apis")
+    public Response getAssociatedApi(@PathParam("domainName") String domainName) {
+        GraphqlApi api = service.getAssociatedApi(domainName);
+        ObjectNode root = objectMapper.createObjectNode();
+        root.set("graphqlApi", objectMapper.valueToTree(api));
+        return Response.ok(root).build();
+    }
+
+    @DELETE
+    @Path("/v1/domainnames/{domainName}/apis")
+    public Response disassociateApi(@PathParam("domainName") String domainName) {
+        service.disassociateApi(domainName);
+        return Response.noContent().build();
+    }
+
+    @GET
+    @Path("/v1/apis/{apiId}/domainnames")
+    public Response listApiAssociations(@PathParam("apiId") String apiId,
+                                        @QueryParam("maxResults") Integer maxResults,
+                                        @QueryParam("nextToken") String nextToken) {
+        var page = service.listApiAssociations(apiId, maxResults, nextToken);
+        ObjectNode root = objectMapper.createObjectNode();
+        ArrayNode items = root.putArray("apiAssociations");
+        page.items().forEach(items::addPOJO);
+        if (page.nextToken() != null) {
+            root.put("nextToken", page.nextToken());
+        } else {
+            root.putNull("nextToken");
+        }
+        return Response.ok(root).build();
+    }
+
+    // ──────────────────────────── Channel Namespaces ────────────────────────────
+
+    @POST
+    @Path("/v1/apis/{apiId}/channelnamespaces")
+    public Response createChannelNamespace(@PathParam("apiId") String apiId, String body) throws IOException {
+        @SuppressWarnings("unchecked")
+        Map<String, Object> request = objectMapper.readValue(body, Map.class);
+        ChannelNamespace ns = service.createChannelNamespace(apiId, request);
+        ObjectNode root = objectMapper.createObjectNode();
+        root.set("channelNamespace", objectMapper.valueToTree(ns));
+        return Response.status(200).entity(root).build();
+    }
+
+    @GET
+    @Path("/v1/apis/{apiId}/channelnamespaces/{name}")
+    public Response getChannelNamespace(@PathParam("apiId") String apiId, @PathParam("name") String name) {
+        ChannelNamespace ns = service.getChannelNamespace(apiId, name);
+        ObjectNode root = objectMapper.createObjectNode();
+        root.set("channelNamespace", objectMapper.valueToTree(ns));
+        return Response.ok(root).build();
+    }
+
+    @POST
+    @Path("/v1/apis/{apiId}/channelnamespaces/{name}")
+    public Response updateChannelNamespace(@PathParam("apiId") String apiId,
+                                            @PathParam("name") String name,
+                                            String body) throws IOException {
+        @SuppressWarnings("unchecked")
+        Map<String, Object> request = objectMapper.readValue(body, Map.class);
+        ChannelNamespace ns = service.updateChannelNamespace(apiId, name, request);
+        ObjectNode root = objectMapper.createObjectNode();
+        root.set("channelNamespace", objectMapper.valueToTree(ns));
+        return Response.ok(root).build();
+    }
+
+    @DELETE
+    @Path("/v1/apis/{apiId}/channelnamespaces/{name}")
+    public Response deleteChannelNamespace(@PathParam("apiId") String apiId, @PathParam("name") String name) {
+        service.deleteChannelNamespace(apiId, name);
+        return Response.noContent().build();
+    }
+
+    @GET
+    @Path("/v1/apis/{apiId}/channelnamespaces")
+    public Response listChannelNamespaces(@PathParam("apiId") String apiId,
+                                          @QueryParam("maxResults") Integer maxResults,
+                                          @QueryParam("nextToken") String nextToken) {
+        var page = service.listChannelNamespaces(apiId, maxResults, nextToken);
+        ObjectNode root = objectMapper.createObjectNode();
+        ArrayNode items = root.putArray("channelNamespaces");
+        page.items().forEach(items::addPOJO);
+        if (page.nextToken() != null) {
+            root.put("nextToken", page.nextToken());
+        } else {
+            root.putNull("nextToken");
+        }
+        return Response.ok(root).build();
+    }
+
+    // ──────────────────────────── Enhanced Metrics ────────────────────────────
+
+    @GET
+    @Path("/v1/apis/{apiId}/enhancedmetrics")
+    public Response getEnhancedMetricsConfig(@PathParam("apiId") String apiId) {
+        Map<String, Object> config = service.getEnhancedMetricsConfig(apiId);
+        ObjectNode root = objectMapper.createObjectNode();
+        if (config != null) {
+            root.set("enhancedMetricsConfig", objectMapper.valueToTree(config));
+        } else {
+            root.putNull("enhancedMetricsConfig");
+        }
+        return Response.ok(root).build();
+    }
+
+    // ──────────────────────────── Merged API Associations ─────────────────
+
+    @POST
+    @Path("/v1/apis/{apiId}/apiassociations")
+    public Response createMergedApiAssociation(@Context HttpHeaders headers,
+                                                @PathParam("apiId") String apiId,
+                                                String body) throws IOException {
+        String region = regionResolver.resolveRegion(headers);
+        @SuppressWarnings("unchecked")
+        Map<String, Object> request = objectMapper.readValue(body, Map.class);
+        ApiAssociation assoc = service.createMergedApiAssociation(apiId, request, region);
+        ObjectNode root = objectMapper.createObjectNode();
+        root.set("apiAssociation", objectMapper.valueToTree(assoc));
+        return Response.status(200).entity(root).build();
+    }
+
+    @GET
+    @Path("/v1/apis/{apiId}/apiassociations/{associationId}")
+    public Response getMergedApiAssociation(@PathParam("apiId") String apiId,
+                                             @PathParam("associationId") String associationId) {
+        ApiAssociation assoc = service.getMergedApiAssociation(apiId, associationId);
+        ObjectNode root = objectMapper.createObjectNode();
+        root.set("apiAssociation", objectMapper.valueToTree(assoc));
+        return Response.ok(root).build();
+    }
+
+    @DELETE
+    @Path("/v1/apis/{apiId}/apiassociations/{associationId}")
+    public Response deleteMergedApiAssociation(@PathParam("apiId") String apiId,
+                                                @PathParam("associationId") String associationId) {
+        service.deleteMergedApiAssociation(apiId, associationId);
+        return Response.noContent().build();
+    }
+
+    @GET
+    @Path("/v1/apis/{apiId}/apiassociations")
+    public Response listMergedApiAssociations(@PathParam("apiId") String apiId,
+                                               @QueryParam("maxResults") Integer maxResults,
+                                               @QueryParam("nextToken") String nextToken) {
+        var page = service.listMergedApiAssociations(apiId, maxResults, nextToken);
+        ObjectNode root = objectMapper.createObjectNode();
+        ArrayNode items = root.putArray("apiAssociations");
+        page.items().forEach(items::addPOJO);
+        if (page.nextToken() != null) {
+            root.put("nextToken", page.nextToken());
+        } else {
+            root.putNull("nextToken");
+        }
+        return Response.ok(root).build();
+    }
 }

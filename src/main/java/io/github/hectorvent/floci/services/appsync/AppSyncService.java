@@ -1,18 +1,19 @@
 package io.github.hectorvent.floci.services.appsync;
 
 import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.core.storage.StorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
+import io.github.hectorvent.floci.services.appsync.graphql.SchemaRegistry;
 import io.github.hectorvent.floci.services.appsync.model.*;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
 import java.util.*;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.Base64;
 
 @ApplicationScoped
@@ -20,17 +21,24 @@ public class AppSyncService {
     private static final Logger LOG = Logger.getLogger(AppSyncService.class);
 
     private final StorageBackend<String, GraphqlApi> apiStore;
-    private final StorageBackend<String, String> schemaStore;         // apiId -> schema SDL
+    private final StorageBackend<String, String> schemaStore;
     private final StorageBackend<String, SchemaCreationStatus> schemaStatusStore;
     private final StorageBackend<String, DataSource> dataSourceStore;
     private final StorageBackend<String, Resolver> resolverStore;
     private final StorageBackend<String, FunctionConfiguration> functionStore;
     private final StorageBackend<String, ApiKey> apiKeyStore;
     private final StorageBackend<String, AppSyncType> typeStore;
+    private final StorageBackend<String, DomainName> domainStore;
+    private final StorageBackend<String, String> associationStore;
+    private final StorageBackend<String, ChannelNamespace> channelNamespaceStore;
+    private final StorageBackend<String, ApiAssociation> mergedApiAssociationStore;
     private final RegionResolver regionResolver;
+    private final SchemaRegistry schemaRegistry;
+    private final ObjectMapper objectMapper;
 
     @Inject
-    public AppSyncService(StorageFactory storageFactory, EmulatorConfig config, RegionResolver regionResolver) {
+    public AppSyncService(StorageFactory storageFactory, EmulatorConfig config, RegionResolver regionResolver,
+                          SchemaRegistry schemaRegistry, ObjectMapper objectMapper) {
         this.apiStore = storageFactory.create("appsync", "appsync-apis.json", new TypeReference<>() {});
         this.schemaStore = storageFactory.create("appsync", "appsync-schemas.json", new TypeReference<>() {});
         this.schemaStatusStore = storageFactory.create("appsync", "appsync-schema-status.json", new TypeReference<>() {});
@@ -39,7 +47,13 @@ public class AppSyncService {
         this.functionStore = storageFactory.create("appsync", "appsync-functions.json", new TypeReference<>() {});
         this.apiKeyStore = storageFactory.create("appsync", "appsync-apikeys.json", new TypeReference<>() {});
         this.typeStore = storageFactory.create("appsync", "appsync-types.json", new TypeReference<>() {});
+        this.domainStore = storageFactory.create("appsync", "appsync-domainnames.json", new TypeReference<>() {});
+        this.associationStore = storageFactory.create("appsync", "appsync-associations.json", new TypeReference<>() {});
+        this.channelNamespaceStore = storageFactory.create("appsync", "appsync-channelnamespaces.json", new TypeReference<>() {});
+        this.mergedApiAssociationStore = storageFactory.create("appsync", "appsync-merged-api-associations.json", new TypeReference<>() {});
         this.regionResolver = regionResolver;
+        this.schemaRegistry = schemaRegistry;
+        this.objectMapper = objectMapper;
     }
 
     // ──────────────────────────── GraphQL API ────────────────────────────
@@ -62,18 +76,27 @@ public class AppSyncService {
         } else {
             api.setXrayEnabled(false);
         }
-        api.setLogConfig((Map<String, Object>) request.get("logConfig"));
+        api.setLogConfig(castMap(request.get("logConfig")));
+
+        api.setApiType(coerceString(request.get("apiType"), "GRAPHQL"));
+        api.setOwner(coerceString(request.get("owner")));
+        api.setOwnerContact(coerceString(request.get("ownerContact")));
+        api.setVisibility(coerceString(request.get("visibility"), "GLOBAL"));
+        api.setIntrospectionConfig(coerceString(request.get("introspectionConfig")));
+        api.setQueryDepthLimit(castInt(request.get("queryDepthLimit")));
+        api.setResolverCountLimit(castInt(request.get("resolverCountLimit")));
+        api.setEnhancedMetricsConfig(castMap(request.get("enhancedMetricsConfig")));
+        api.setLambdaAuthorizerConfig(castMap(request.get("lambdaAuthorizerConfig")));
+        api.setOpenIDConnectConfig(castMap(request.get("openIDConnectConfig")));
+        api.setUserPoolConfig(castMap(request.get("userPoolConfig")));
+        api.setDns(castStringMap(request.get("dns")));
+        api.setWafWebAclArn(coerceString(request.get("wafWebAclArn")));
+        api.setMergedApiExecutionRoleArn(coerceString(request.get("mergedApiExecutionRoleArn")));
 
         Object additionalObj = request.get("additionalAuthenticationProviders");
         if (additionalObj instanceof List<?> additionalList) {
-            List<Map<String, Object>> providers = new ArrayList<>();
-            for (Object item : additionalList) {
-                if (item instanceof Map<?, ?> map) {
-                    @SuppressWarnings("unchecked")
-                    Map<String, Object> casted = (Map<String, Object>) map;
-                    providers.add(casted);
-                }
-            }
+            List<AdditionalAuthenticationProvider> providers = objectMapper.convertValue(
+                additionalList, new TypeReference<List<AdditionalAuthenticationProvider>>() {});
             api.setAdditionalAuthenticationProviders(providers);
         }
 
@@ -85,7 +108,7 @@ public class AppSyncService {
         uris.put("REALTIME", "ws://localhost:4566/v1/apis/" + apiId + "/graphql/realtime");
         api.setUris(uris);
 
-        Map<String, Object> tags = (Map<String, Object>) request.get("tags");
+        Map<String, Object> tags = castMap(request.get("tags"));
         if (tags != null) {
             Map<String, String> tagMap = new HashMap<>();
             tags.forEach((k, v) -> tagMap.put(k, String.valueOf(v)));
@@ -106,6 +129,7 @@ public class AppSyncService {
         return paginate(apiStore.scan(k -> true), nextToken, maxResults);
     }
 
+    @SuppressWarnings("unchecked")
     public GraphqlApi updateGraphqlApi(String apiId, Map<String, Object> request, String region) {
         GraphqlApi existing = getGraphqlApi(apiId);
         if (request.containsKey("name")) existing.setName((String) request.get("name"));
@@ -125,6 +149,31 @@ public class AppSyncService {
             tags.forEach((k, v) -> tagMap.put(k, String.valueOf(v)));
             existing.setTags(tagMap);
         }
+        if (request.containsKey("apiType")) existing.setApiType((String) request.get("apiType"));
+        if (request.containsKey("owner")) existing.setOwner((String) request.get("owner"));
+        if (request.containsKey("ownerContact")) existing.setOwnerContact((String) request.get("ownerContact"));
+        if (request.containsKey("visibility")) existing.setVisibility((String) request.get("visibility"));
+        if (request.containsKey("introspectionConfig")) existing.setIntrospectionConfig((String) request.get("introspectionConfig"));
+        if (request.containsKey("queryDepthLimit")) existing.setQueryDepthLimit(castInt(request.get("queryDepthLimit")));
+        if (request.containsKey("resolverCountLimit")) existing.setResolverCountLimit(castInt(request.get("resolverCountLimit")));
+        if (request.containsKey("enhancedMetricsConfig")) existing.setEnhancedMetricsConfig((Map<String, Object>) request.get("enhancedMetricsConfig"));
+        if (request.containsKey("lambdaAuthorizerConfig")) existing.setLambdaAuthorizerConfig((Map<String, Object>) request.get("lambdaAuthorizerConfig"));
+        if (request.containsKey("openIDConnectConfig")) existing.setOpenIDConnectConfig((Map<String, Object>) request.get("openIDConnectConfig"));
+        if (request.containsKey("userPoolConfig")) existing.setUserPoolConfig((Map<String, Object>) request.get("userPoolConfig"));
+        if (request.containsKey("dns")) {
+            @SuppressWarnings("unchecked")
+            Map<String, String> dns = (Map<String, String>) request.get("dns");
+            existing.setDns(dns);
+        }
+        if (request.containsKey("wafWebAclArn")) existing.setWafWebAclArn((String) request.get("wafWebAclArn"));
+        if (request.containsKey("mergedApiExecutionRoleArn")) existing.setMergedApiExecutionRoleArn((String) request.get("mergedApiExecutionRoleArn"));
+        if (request.containsKey("additionalAuthenticationProviders")) {
+            Object additionalObj = request.get("additionalAuthenticationProviders");
+            if (additionalObj instanceof List<?> additionalList) {
+                existing.setAdditionalAuthenticationProviders(
+                    objectMapper.convertValue(additionalList, new TypeReference<List<AdditionalAuthenticationProvider>>() {}));
+            }
+        }
         apiStore.put(apiId, existing);
         return existing;
     }
@@ -134,11 +183,14 @@ public class AppSyncService {
         apiStore.delete(apiId);
         schemaStore.delete(apiId);
         schemaStatusStore.delete(apiId);
+        schemaRegistry.remove(apiId);
         deleteDataSourcesForApi(apiId);
         deleteResolversForApi(apiId);
         deleteFunctionsForApi(apiId);
         deleteTypesForApi(apiId);
         deleteApiKeysForApi(apiId);
+        deleteChannelNamespacesForApi(apiId);
+        deleteDomainAssociationsForApi(apiId);
         LOG.infov("Deleted GraphQL API {0}", apiId);
     }
 
@@ -146,6 +198,7 @@ public class AppSyncService {
 
     public void startSchemaCreation(String apiId, String definition) {
         getGraphqlApi(apiId);
+        schemaRegistry.register(apiId, definition);
         schemaStore.put(apiId, definition);
         SchemaCreationStatus status = new SchemaCreationStatus();
         status.setStatus(SchemaCreationStatusType.ACTIVE);
@@ -166,7 +219,7 @@ public class AppSyncService {
 
     // ──────────────────────────── Data Sources ────────────────────────────
 
-    public DataSource createDataSource(String apiId, Map<String, Object> request) {
+    public DataSource createDataSource(String apiId, Map<String, Object> request, String region) {
         getGraphqlApi(apiId);
         String name = (String) request.get("name");
         if (name == null || name.isBlank()) {
@@ -180,13 +233,14 @@ public class AppSyncService {
         ds.setDescription((String) request.get("description"));
         ds.setType(parseEnum(DataSourceType.class, request.get("type")));
         ds.setServiceRoleArn((String) request.get("serviceRoleArn"));
-        ds.setDynamodbConfig((Map<String, Object>) request.get("dynamodbConfig"));
-        ds.setLambdaConfig((Map<String, Object>) request.get("lambdaConfig"));
-        ds.setHttpConfig((Map<String, Object>) request.get("httpConfig"));
-        ds.setEventBridgeConfig((Map<String, Object>) request.get("eventBridgeConfig"));
-        ds.setRelationalDatabaseConfig((Map<String, Object>) request.get("relationalDatabaseConfig"));
-        ds.setOpenSearchServiceConfig((Map<String, Object>) request.get("openSearchServiceConfig"));
-        ds.setAmazonBedrockRuntimeConfig((Map<String, Object>) request.get("amazonBedrockRuntimeConfig"));
+        ds.setDynamodbConfig(castMap(request.get("dynamodbConfig")));
+        ds.setLambdaConfig(castMap(request.get("lambdaConfig")));
+        ds.setHttpConfig(castMap(request.get("httpConfig")));
+        ds.setEventBridgeConfig(castMap(request.get("eventBridgeConfig")));
+        ds.setRelationalDatabaseConfig(castMap(request.get("relationalDatabaseConfig")));
+        ds.setOpenSearchServiceConfig(castMap(request.get("openSearchServiceConfig")));
+        ds.setAmazonBedrockRuntimeConfig(castMap(request.get("amazonBedrockRuntimeConfig")));
+        ds.setDataSourceArn(regionResolver.buildArn("appsync", region, "apis/" + apiId + "/datasources/" + name));
 
         dataSourceStore.put(apiKey(apiId, ds.getName()), ds);
         return ds;
@@ -201,6 +255,7 @@ public class AppSyncService {
         return paginate(dataSourceStore.scan(k -> k.startsWith(apiId + "::")), nextToken, maxResults);
     }
 
+    @SuppressWarnings("unchecked")
     public DataSource updateDataSource(String apiId, String dataSourceName, Map<String, Object> request) {
         DataSource existing = getDataSource(apiId, dataSourceName);
         if (request.containsKey("description")) existing.setDescription((String) request.get("description"));
@@ -222,20 +277,9 @@ public class AppSyncService {
         dataSourceStore.delete(apiKey(apiId, dataSourceName));
     }
 
-    private void deleteDataSourcesForApi(String apiId) {
-        dataSourceStore.scan(k -> k.startsWith(apiId + "::"))
-                .forEach(ds -> {
-                    try {
-                        dataSourceStore.delete(apiKey(apiId, ds.getName()));
-                    } catch (Exception e) {
-                        // ignore - already deleted
-                    }
-                });
-    }
-
     // ──────────────────────────── Resolvers ────────────────────────────
 
-    public Resolver createResolver(String apiId, Map<String, Object> request) {
+    public Resolver createResolver(String apiId, Map<String, Object> request, String region) {
         getGraphqlApi(apiId);
         String fieldName = (String) request.get("fieldName");
         if (fieldName == null || fieldName.isBlank()) {
@@ -245,9 +289,10 @@ public class AppSyncService {
         if (dataSourceName == null || dataSourceName.isBlank()) {
             throw new AwsException("BadRequestException", "A data source name is required for the resolver", 400);
         }
+        String typeName = (String) request.get("typeName");
         Resolver resolver = new Resolver();
         resolver.setApiId(apiId);
-        resolver.setTypeName((String) request.get("typeName"));
+        resolver.setTypeName(typeName);
         resolver.setFieldName((String) request.get("fieldName"));
         resolver.setDataSourceName((String) request.get("dataSourceName"));
         resolver.setFunctionId((String) request.get("functionId"));
@@ -255,8 +300,15 @@ public class AppSyncService {
         resolver.setResponseMappingTemplate((String) request.get("responseMappingTemplate"));
         resolver.setKind(parseEnum(ResolverKind.class, request.getOrDefault("kind", "UNIT")));
         resolver.setCode((String) request.get("code"));
+        resolver.setCachingConfig(castMap(request.get("cachingConfig")));
+        resolver.setMaxBatchSize(castInt(request.get("maxBatchSize")));
+        resolver.setMetricsConfig((String) request.get("metricsConfig"));
+        resolver.setPipelineConfig(castMap(request.get("pipelineConfig")));
+        resolver.setSyncConfig(castMap(request.get("syncConfig")));
+        resolver.setResolverArn(regionResolver.buildArn("appsync", region,
+            "apis/" + apiId + "/types/" + typeName + "/resolvers/" + fieldName));
 
-        Map<String, Object> runtime = (Map<String, Object>) request.get("runtime");
+        Map<String, Object> runtime = castMap(request.get("runtime"));
         if (runtime != null) {
             Resolver.ResolverRuntime rt = new Resolver.ResolverRuntime();
             rt.setName(parseEnum(ResolverRuntimeName.class, runtime.get("name")));
@@ -294,6 +346,7 @@ public class AppSyncService {
         return paginate(all, nextToken, maxResults);
     }
 
+    @SuppressWarnings("unchecked")
     public Resolver updateResolver(String apiId, String typeName, String fieldName, Map<String, Object> request) {
         Resolver existing = getResolver(apiId, typeName, fieldName);
         if (request.containsKey("dataSourceName")) existing.setDataSourceName((String) request.get("dataSourceName"));
@@ -302,6 +355,11 @@ public class AppSyncService {
         if (request.containsKey("responseMappingTemplate")) existing.setResponseMappingTemplate((String) request.get("responseMappingTemplate"));
         if (request.containsKey("kind")) existing.setKind(parseEnum(ResolverKind.class, request.get("kind")));
         if (request.containsKey("code")) existing.setCode((String) request.get("code"));
+        if (request.containsKey("cachingConfig")) existing.setCachingConfig((Map<String, Object>) request.get("cachingConfig"));
+        if (request.containsKey("maxBatchSize")) existing.setMaxBatchSize(castInt(request.get("maxBatchSize")));
+        if (request.containsKey("metricsConfig")) existing.setMetricsConfig((String) request.get("metricsConfig"));
+        if (request.containsKey("pipelineConfig")) existing.setPipelineConfig((Map<String, Object>) request.get("pipelineConfig"));
+        if (request.containsKey("syncConfig")) existing.setSyncConfig((Map<String, Object>) request.get("syncConfig"));
         if (request.containsKey("runtime")) {
             Map<String, Object> runtime = (Map<String, Object>) request.get("runtime");
             Resolver.ResolverRuntime rt = new Resolver.ResolverRuntime();
@@ -316,11 +374,6 @@ public class AppSyncService {
     public void deleteResolver(String apiId, String typeName, String fieldName) {
         getResolver(apiId, typeName, fieldName);
         resolverStore.delete(resolverKey(apiId, typeName, fieldName));
-    }
-
-    private void deleteResolversForApi(String apiId) {
-        resolverStore.scan(k -> k.startsWith(apiId + "::"))
-                .forEach(r -> resolverStore.delete(resolverKey(apiId, r.getTypeName(), r.getFieldName())));
     }
 
     // ──────────────────────────── Functions ────────────────────────────
@@ -339,7 +392,7 @@ public class AppSyncService {
         fn.setRequestMappingTemplate((String) request.get("requestMappingTemplate"));
         fn.setResponseMappingTemplate((String) request.get("responseMappingTemplate"));
         fn.setFunctionVersion((String) request.getOrDefault("functionVersion", "2018-05-29"));
-        fn.setArn(buildFunctionArn(apiId, fn.getFunctionId(), region));
+        fn.setFunctionArn(buildFunctionArn(apiId, fn.getFunctionId(), region));
         fn.setCode((String) request.get("code"));
 
         functionStore.put(apiKey(apiId, fn.getFunctionId()), fn);
@@ -355,6 +408,7 @@ public class AppSyncService {
         return paginate(functionStore.scan(k -> k.startsWith(apiId + "::")), nextToken, maxResults);
     }
 
+    @SuppressWarnings("unchecked")
     public FunctionConfiguration updateFunction(String apiId, String functionId, Map<String, Object> request) {
         FunctionConfiguration existing = getFunction(apiId, functionId);
         if (request.containsKey("description")) existing.setDescription((String) request.get("description"));
@@ -370,11 +424,6 @@ public class AppSyncService {
     public void deleteFunction(String apiId, String functionId) {
         getFunction(apiId, functionId);
         functionStore.delete(apiKey(apiId, functionId));
-    }
-
-    private void deleteFunctionsForApi(String apiId) {
-        functionStore.scan(k -> k.startsWith(apiId + "::"))
-                .forEach(fn -> functionStore.delete(apiKey(apiId, fn.getFunctionId())));
     }
 
     // ──────────────────────────── Types ────────────────────────────
@@ -423,11 +472,6 @@ public class AppSyncService {
         typeStore.delete(apiKey(apiId, typeName));
     }
 
-    private void deleteTypesForApi(String apiId) {
-        typeStore.scan(k -> k.startsWith(apiId + "::"))
-                .forEach(t -> typeStore.delete(apiKey(apiId, t.getName())));
-    }
-
     // ──────────────────────────── API Keys ────────────────────────────
 
     public ApiKey createApiKey(String apiId, Map<String, Object> request) {
@@ -445,12 +489,10 @@ public class AppSyncService {
             try {
                 key.setExpires(Long.parseLong(s));
             } catch (NumberFormatException e) {
-                // try parsing as ISO date and convert to epoch seconds
                 key.setExpires(null);
             }
         }
 
-        // Generate a simple API key string
         key.setApiKey("da2-" + generateShortId());
 
         apiKeyStore.put(apiKey(apiId, key.getId()), key);
@@ -492,11 +534,6 @@ public class AppSyncService {
         apiKeyStore.delete(apiKey(apiId, keyId));
     }
 
-    private void deleteApiKeysForApi(String apiId) {
-        apiKeyStore.scan(k -> k.startsWith(apiId + "::"))
-                .forEach(k -> apiKeyStore.delete(apiKey(apiId, k.getId())));
-    }
-
     // ──────────────────────────── Tags ────────────────────────────
 
     public Map<String, String> getTags(String resourceArn) {
@@ -531,6 +568,184 @@ public class AppSyncService {
         api.setEnvironmentVariables(new HashMap<>(environmentVariables));
         apiStore.put(apiId, api);
         return api.getEnvironmentVariables();
+    }
+
+    // ──────────────────────────── Domain Names ────────────────────────────
+
+    public DomainName createDomainName(Map<String, Object> request) {
+        String domainName = (String) request.get("domainName");
+        if (domainName == null || domainName.isBlank()) {
+            throw new AwsException("BadRequestException", "A domain name is required", 400);
+        }
+        if (domainStore.get(domainName).isPresent()) {
+            throw new AwsException("ConflictException", "Domain name already exists: " + domainName, 409);
+        }
+        DomainName dn = new DomainName();
+        dn.setDomainName(domainName);
+        dn.setDescription((String) request.get("description"));
+        dn.setCertificateArn((String) request.get("certificateArn"));
+        String shortId = generateShortId();
+        dn.setAppsyncDomainName(shortId + ".appsync-api.us-east-1.amazonaws.com");
+        dn.setHostedZoneId("Z" + generateShortId());
+        dn.setDomainNameArn(regionResolver.buildArn("appsync", regionResolver.getDefaultRegion(),
+            "domainnames/" + domainName));
+
+        Object tagsObj = request.get("tags");
+        if (tagsObj instanceof Map<?, ?> tagMap) {
+            Map<String, String> tagStrings = new HashMap<>();
+            tagMap.forEach((k, v) -> tagStrings.put(String.valueOf(k), String.valueOf(v)));
+            dn.setTags(tagStrings);
+        }
+
+        domainStore.put(domainName, dn);
+        return dn;
+    }
+
+    public DomainName getDomainName(String domainName) {
+        return domainStore.get(domainName)
+                .orElseThrow(() -> new AwsException("NotFoundException", "Domain name not found: " + domainName, 404));
+    }
+
+    public Page<DomainName> listDomainNames(Integer maxResults, String nextToken) {
+        return paginate(domainStore.scan(k -> true), nextToken, maxResults);
+    }
+
+    public DomainName updateDomainName(String domainName, Map<String, Object> request) {
+        DomainName existing = getDomainName(domainName);
+        if (request.containsKey("description")) existing.setDescription((String) request.get("description"));
+        domainStore.put(domainName, existing);
+        return existing;
+    }
+
+    public void deleteDomainName(String domainName) {
+        getDomainName(domainName);
+        associationStore.delete(domainName);
+        domainStore.delete(domainName);
+    }
+
+    public void associateApi(String domainName, String apiId) {
+        getDomainName(domainName);
+        getGraphqlApi(apiId);
+        associationStore.put(domainName, apiId);
+    }
+
+    public String getAssociatedApiId(String domainName) {
+        getDomainName(domainName);
+        return associationStore.get(domainName).orElse(null);
+    }
+
+    public GraphqlApi getAssociatedApi(String domainName) {
+        String apiId = getAssociatedApiId(domainName);
+        if (apiId == null) {
+            throw new AwsException("NotFoundException", "No API associated with domain: " + domainName, 404);
+        }
+        return getGraphqlApi(apiId);
+    }
+
+    public void disassociateApi(String domainName) {
+        getDomainName(domainName);
+        associationStore.delete(domainName);
+    }
+
+    public Page<Map<String, String>> listApiAssociations(String apiId, Integer maxResults, String nextToken) {
+        List<Map<String, String>> associations = new ArrayList<>();
+        for (String key : associationStore.keys()) {
+            String assocApiId = associationStore.get(key).orElse(null);
+            if (apiId.equals(assocApiId)) {
+                Map<String, String> entry = new HashMap<>();
+                entry.put("domainName", key);
+                entry.put("apiId", apiId);
+                associations.add(entry);
+            }
+        }
+        return paginate(associations, nextToken, maxResults);
+    }
+
+    // ──────────────────────────── Channel Namespaces ────────────────────────────
+
+    public ChannelNamespace createChannelNamespace(String apiId, Map<String, Object> request) {
+        getGraphqlApi(apiId);
+        String name = (String) request.get("name");
+        if (name == null || name.isBlank()) {
+            throw new AwsException("BadRequestException", "A channel namespace name is required", 400);
+        }
+        ChannelNamespace ns = new ChannelNamespace();
+        ns.setName(name);
+        ns.setApiId(apiId);
+        ns.setDescription((String) request.get("description"));
+        channelNamespaceStore.put(apiKey(apiId, name), ns);
+        return ns;
+    }
+
+    public ChannelNamespace getChannelNamespace(String apiId, String name) {
+        return channelNamespaceStore.get(apiKey(apiId, name))
+                .orElseThrow(() -> new AwsException("NotFoundException",
+                        "Channel namespace not found: " + name, 404));
+    }
+
+    public ChannelNamespace updateChannelNamespace(String apiId, String name, Map<String, Object> request) {
+        ChannelNamespace existing = getChannelNamespace(apiId, name);
+        if (request.containsKey("description")) existing.setDescription((String) request.get("description"));
+        channelNamespaceStore.put(apiKey(apiId, name), existing);
+        return existing;
+    }
+
+    public void deleteChannelNamespace(String apiId, String name) {
+        getChannelNamespace(apiId, name);
+        channelNamespaceStore.delete(apiKey(apiId, name));
+    }
+
+    public Page<ChannelNamespace> listChannelNamespaces(String apiId, Integer maxResults, String nextToken) {
+        return paginate(channelNamespaceStore.scan(k -> k.startsWith(apiId + "::")), nextToken, maxResults);
+    }
+
+    // ──────────────────────────── Enhanced Metrics ────────────────────────────
+
+    public Map<String, Object> getEnhancedMetricsConfig(String apiId) {
+        return getGraphqlApi(apiId).getEnhancedMetricsConfig();
+    }
+
+    // ──────────────────────────── Merged API Associations ─────────────────
+
+    public ApiAssociation createMergedApiAssociation(String apiId, Map<String, Object> request, String region) {
+        getGraphqlApi(apiId);
+        String sourceApiId = (String) request.get("sourceApiId");
+        if (sourceApiId == null || sourceApiId.isBlank()) {
+            throw new AwsException("BadRequestException", "A source API ID is required", 400);
+        }
+        getGraphqlApi(sourceApiId);
+        ApiAssociation assoc = new ApiAssociation();
+        assoc.setAssociationId(generateShortId());
+        assoc.setApiId(apiId);
+        assoc.setSourceApiId(sourceApiId);
+        assoc.setSourceApiArn(regionResolver.buildArn("appsync", region, "apis/" + sourceApiId));
+        assoc.setDescription((String) request.get("description"));
+        assoc.setStatus("MERGED");
+        mergedApiAssociationStore.put(assoc.getAssociationId(), assoc);
+        return assoc;
+    }
+
+    public ApiAssociation getMergedApiAssociation(String apiId, String associationId) {
+        ApiAssociation assoc = mergedApiAssociationStore.get(associationId)
+                .orElseThrow(() -> new AwsException("NotFoundException",
+                        "API association not found: " + associationId, 404));
+        if (!apiId.equals(assoc.getApiId())) {
+            throw new AwsException("NotFoundException",
+                    "API association not found: " + associationId, 404);
+        }
+        return assoc;
+    }
+
+    public void deleteMergedApiAssociation(String apiId, String associationId) {
+        getMergedApiAssociation(apiId, associationId);
+        mergedApiAssociationStore.delete(associationId);
+    }
+
+    public Page<ApiAssociation> listMergedApiAssociations(String apiId, Integer maxResults, String nextToken) {
+        List<ApiAssociation> filtered = mergedApiAssociationStore.scan(k -> true).stream()
+                .filter(a -> apiId.equals(a.getApiId()))
+                .toList();
+        return paginate(filtered, nextToken, maxResults);
     }
 
     // ──────────────────────────── Helpers ────────────────────────────
@@ -572,6 +787,42 @@ public class AppSyncService {
         return String.valueOf(value);
     }
 
+    private String coerceString(Object value, String defaultValue) {
+        String result = coerceString(value);
+        return result != null ? result : defaultValue;
+    }
+
+    private Integer castInt(Object value) {
+        if (value == null) return null;
+        if (value instanceof Integer i) return i;
+        if (value instanceof Number n) return n.intValue();
+        try {
+            return Integer.parseInt(value.toString());
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> castMap(Object value) {
+        if (value instanceof Map) {
+            return (Map<String, Object>) value;
+        }
+        return null;
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, String> castStringMap(Object value) {
+        if (value instanceof Map) {
+            Map<String, String> result = new HashMap<>();
+            for (var entry : ((Map<Object, Object>) value).entrySet()) {
+                result.put(String.valueOf(entry.getKey()), String.valueOf(entry.getValue()));
+            }
+            return result;
+        }
+        return null;
+    }
+
     private <E extends Enum<E>> E parseEnum(Class<E> enumClass, Object value) {
         if (value == null) return null;
         String str = value instanceof String s ? s : String.valueOf(value);
@@ -580,6 +831,45 @@ public class AppSyncService {
         } catch (IllegalArgumentException e) {
             throw new AwsException("BadRequestException",
                     "Invalid value '" + str + "' for " + enumClass.getSimpleName(), 400);
+        }
+    }
+
+    private void deleteDataSourcesForApi(String apiId) {
+        dataSourceStore.scan(k -> k.startsWith(apiId + "::"))
+                .forEach(ds -> dataSourceStore.delete(apiKey(apiId, ds.getName())));
+    }
+
+    private void deleteResolversForApi(String apiId) {
+        resolverStore.scan(k -> k.startsWith(apiId + "::"))
+                .forEach(r -> resolverStore.delete(resolverKey(apiId, r.getTypeName(), r.getFieldName())));
+    }
+
+    private void deleteFunctionsForApi(String apiId) {
+        functionStore.scan(k -> k.startsWith(apiId + "::"))
+                .forEach(fn -> functionStore.delete(apiKey(apiId, fn.getFunctionId())));
+    }
+
+    private void deleteTypesForApi(String apiId) {
+        typeStore.scan(k -> k.startsWith(apiId + "::"))
+                .forEach(t -> typeStore.delete(apiKey(apiId, t.getName())));
+    }
+
+    private void deleteApiKeysForApi(String apiId) {
+        apiKeyStore.scan(k -> k.startsWith(apiId + "::"))
+                .forEach(k -> apiKeyStore.delete(apiKey(apiId, k.getId())));
+    }
+
+    private void deleteChannelNamespacesForApi(String apiId) {
+        channelNamespaceStore.scan(k -> k.startsWith(apiId + "::"))
+                .forEach(ns -> channelNamespaceStore.delete(apiKey(apiId, ns.getName())));
+    }
+
+    private void deleteDomainAssociationsForApi(String apiId) {
+        for (String key : associationStore.keys()) {
+            String assocApiId = associationStore.get(key).orElse(null);
+            if (apiId.equals(assocApiId)) {
+                associationStore.delete(key);
+            }
         }
     }
 
@@ -621,7 +911,6 @@ public class AppSyncService {
     static String extractTypeNameFromDefinition(String definition) {
         if (definition == null || definition.isBlank()) return null;
         String trimmed = definition.strip();
-        // Match: type TypeName { ... } or input TypeName { ... } or enum TypeName { ... }
         String[] parts = trimmed.split("\\s+");
         if (parts.length >= 2) {
             return parts[1].replaceAll("[{(].*", "");
