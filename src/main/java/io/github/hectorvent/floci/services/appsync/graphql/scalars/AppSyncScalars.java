@@ -1,5 +1,7 @@
 package io.github.hectorvent.floci.services.appsync.graphql.scalars;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import graphql.language.StringValue;
 import graphql.schema.Coercing;
 import graphql.schema.CoercingParseLiteralException;
@@ -21,19 +23,27 @@ import java.util.regex.Pattern;
 
 public final class AppSyncScalars {
 
+    private static final ObjectMapper SHARED_MAPPER = new ObjectMapper();
+
     public static final GraphQLScalarType AWSJSON = GraphQLScalarType.newScalar()
         .name("AWSJSON")
         .description("A JSON string")
         .coercing(new Coercing<String, String>() {
             @Override
             public String serialize(Object dataFetcherResult) {
-                return dataFetcherResult != null ? dataFetcherResult.toString() : null;
+                if (dataFetcherResult == null) return null;
+                if (dataFetcherResult instanceof String s) return s;
+                try {
+                    return SHARED_MAPPER.writeValueAsString(dataFetcherResult);
+                } catch (JsonProcessingException e) {
+                    throw new CoercingSerializeException("Cannot serialize to JSON: " + e.getMessage());
+                }
             }
             @Override
             public String parseValue(Object input) {
                 String str = input.toString();
                 try {
-                    new com.fasterxml.jackson.databind.ObjectMapper().readTree(str);
+                    SHARED_MAPPER.readTree(str);
                 } catch (Exception e) {
                     throw new CoercingParseValueException("Invalid JSON: " + str);
                 }
