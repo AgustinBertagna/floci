@@ -548,6 +548,19 @@ class AppSyncTest {
                 .hasMessageContaining("Invalid schema");
     }
 
+    @Test
+    @Order(94)
+    void startSchemaCreation_withAWSScalars() {
+        StartSchemaCreationResponse resp = client.startSchemaCreation(
+                StartSchemaCreationRequest.builder()
+                        .apiId(apiId)
+                        .definition(SdkBytes.fromUtf8String(
+                                "type Query { now: AWSDateTime, data: AWSJSON, ip: AWSIPAddress, active: AWSBoolean }"))
+                        .build());
+
+        assertThat(resp.status()).isNotNull();
+    }
+
     // ── Error Handling ─────────────────────────────────────────────────
 
     @Test
