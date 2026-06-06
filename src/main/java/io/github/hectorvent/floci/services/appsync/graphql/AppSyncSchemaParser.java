@@ -10,10 +10,10 @@ import io.github.hectorvent.floci.services.appsync.graphql.scalars.AppSyncScalar
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
-import java.util.Map;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 @ApplicationScoped
 public class AppSyncSchemaParser {
@@ -26,10 +26,10 @@ public class AppSyncSchemaParser {
 
     public GraphQLSchema parse(String sdl) {
         String sdlWithDirectives = injectDirectiveDefinitions(sdl);
-        SchemaParser parser = new SchemaParser();
-        TypeDefinitionRegistry typeRegistry;
         validateNoUnknownDirectives(sdl);
 
+        SchemaParser parser = new SchemaParser();
+        TypeDefinitionRegistry typeRegistry;
         try {
             typeRegistry = parser.parse(sdlWithDirectives);
         } catch (Exception e) {
@@ -37,8 +37,7 @@ public class AppSyncSchemaParser {
         }
 
         RuntimeWiring.Builder wiringBuilder = RuntimeWiring.newRuntimeWiring();
-        Map<String, graphql.schema.GraphQLScalarType> scalars = scalarRegistry.scalarMap();
-        for (var entry : scalars.entrySet()) {
+        for (var entry : scalarRegistry.scalarMap().entrySet()) {
             wiringBuilder = wiringBuilder.scalar(entry.getValue());
         }
 
@@ -50,19 +49,15 @@ public class AppSyncSchemaParser {
     }
 
     private void validateNoUnknownDirectives(String sdl) {
-        Set<String> known = Set.of("skip", "include", "deprecated",
-            "aws_api_key", "aws_iam", "aws_cognito_user_pools", "aws_oidc",
-            "aws_lambda", "aws_subscribe", "aws_auth", "aws_delta_sync");
-        // Strip string literals and comments before checking for unknown directives
         String clean = sdl
-            .replaceAll("\"\"\"[\\s\\S]*?\"\"\"", "") // block strings
-            .replaceAll("\"(?:[^\"\\\\]|\\\\.)*\"", "") // line strings
-            .replaceAll("#[^\n]*", "");                // comments
+            .replaceAll("\"\"\"[\\s\\S]*?\"\"\"", "")
+            .replaceAll("\"(?:[^\"\\\\]|\\\\.)*\"", "")
+            .replaceAll("#[^\n]*", "");
         Pattern directivePattern = Pattern.compile("@(\\w+)");
         Matcher matcher = directivePattern.matcher(clean);
         while (matcher.find()) {
             String name = matcher.group(1);
-            if (!known.contains(name)) {
+            if (!AppSyncDirective.isKnown(name)) {
                 throw new AwsException("BadRequestException",
                     "Unknown directive: @" + name, 400);
             }
@@ -71,18 +66,12 @@ public class AppSyncSchemaParser {
 
     private String injectDirectiveDefinitions(String sdl) {
         StringBuilder sb = new StringBuilder();
-        sb.append("""
-            directive @aws_api_key on OBJECT | FIELD_DEFINITION
-            directive @aws_iam on OBJECT | FIELD_DEFINITION
-            directive @aws_cognito_user_pools(cognito_groups: [String!]!) on OBJECT | FIELD_DEFINITION
-            directive @aws_oidc on OBJECT | FIELD_DEFINITION
-            directive @aws_lambda on OBJECT | FIELD_DEFINITION
-            directive @aws_subscribe(mutations: [String!]!) on FIELD_DEFINITION
-            directive @aws_auth(cognito_groups: [String!]!) on OBJECT
-            directive @aws_delta_sync(tableName: String!, deltaSyncTableTTL: Int!, baseTableTTL: Int!) on OBJECT
-
-            """);
-        for (String scalarName : scalarRegistry.scalarMap().keySet()) {
+        for (AppSyncDirective directive : AppSyncDirective.values()) {
+            sb.append(directive.sdl()).append("\n");
+        }
+        sb.append("\n");
+        for (String scalarName : scalarRegistry.allScalars().stream()
+                .map(s -> s.getName()).collect(Collectors.toList())) {
             sb.append("scalar ").append(scalarName).append("\n");
         }
         sb.append("\n");
