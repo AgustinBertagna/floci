@@ -2,6 +2,7 @@ package io.github.hectorvent.floci.services.appsync.graphql.scalars;
 
 import graphql.schema.GraphQLScalarType;
 import graphql.schema.CoercingParseValueException;
+import graphql.schema.CoercingSerializeException;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -80,5 +81,72 @@ class AppSyncScalarsTest {
 
         assertThrows(CoercingParseValueException.class, () -> AppSyncScalars.AWS_SHORT.getCoercing().parseValue(40000));
         assertThrows(CoercingParseValueException.class, () -> AppSyncScalars.AWS_SHORT.getCoercing().parseValue(-32769));
+    }
+
+    @Test
+    void scalar_awstimestamp_parseValue_withString() {
+        Object valid = AppSyncScalars.AWS_TIMESTAMP.getCoercing().parseValue("1700000000");
+        assertThat(valid, is(1700000000L));
+
+        assertThrows(Exception.class, () -> AppSyncScalars.AWS_TIMESTAMP.getCoercing().parseValue("not-a-number"));
+    }
+
+    @Test
+    void scalar_serialize_nullSafety() {
+        assertThat(AppSyncScalars.AWS_TIMESTAMP.getCoercing().serialize(null), is(nullValue()));
+        assertThat(AppSyncScalars.AWS_LONG.getCoercing().serialize(null), is(nullValue()));
+        assertThat(AppSyncScalars.AWS_INTEGER.getCoercing().serialize(null), is(nullValue()));
+        assertThat(AppSyncScalars.AWS_FLOAT.getCoercing().serialize(null), is(nullValue()));
+        assertThat(AppSyncScalars.AWS_BOOLEAN.getCoercing().serialize(null), is(nullValue()));
+    }
+
+    @Test
+    void scalar_awsipaddress_validIps() {
+        assertThat(AppSyncScalars.AWS_IP_ADDRESS.getCoercing().parseValue("192.168.1.1"), is("192.168.1.1"));
+        assertThat(AppSyncScalars.AWS_IP_ADDRESS.getCoercing().parseValue("255.255.255.255"), is("255.255.255.255"));
+        assertThat(AppSyncScalars.AWS_IP_ADDRESS.getCoercing().parseValue("0.0.0.0"), is("0.0.0.0"));
+        assertThat(AppSyncScalars.AWS_IP_ADDRESS.getCoercing().parseValue("2001:0db8:85a3:0000:0000:8a2e:0370:7334"),
+            is("2001:0db8:85a3:0000:0000:8a2e:0370:7334"));
+        assertThat(AppSyncScalars.AWS_IP_ADDRESS.getCoercing().parseValue("::1"), is("::1"));
+    }
+
+    @Test
+    void scalar_awsipaddress_invalidIps() {
+        assertThrows(CoercingParseValueException.class, () -> AppSyncScalars.AWS_IP_ADDRESS.getCoercing().parseValue("999.999.999.999"));
+        assertThrows(CoercingParseValueException.class, () -> AppSyncScalars.AWS_IP_ADDRESS.getCoercing().parseValue("not-an-ip"));
+        assertThrows(CoercingParseValueException.class, () -> AppSyncScalars.AWS_IP_ADDRESS.getCoercing().parseValue("localhost"));
+        assertThrows(CoercingParseValueException.class, () -> AppSyncScalars.AWS_IP_ADDRESS.getCoercing().parseValue("google.com"));
+    }
+
+    @Test
+    void scalar_scalarMap_cached() {
+        AppSyncScalarRegistry registry = new AppSyncScalarRegistry();
+        var map1 = registry.scalarMap();
+        var map2 = registry.scalarMap();
+        assertThat(map1, is(sameInstance(map2)));
+        assertThat(map1, hasKey("AWSDateTime"));
+        assertThat(map1, hasKey("AWSJSON"));
+        assertThat(map1.size(), greaterThanOrEqualTo(17));
+    }
+
+    @Test
+    void scalar_awsboolean_rejectsNonBoolean() {
+        assertThat(AppSyncScalars.AWS_BOOLEAN.getCoercing().parseValue(true), is(true));
+        assertThat(AppSyncScalars.AWS_BOOLEAN.getCoercing().parseValue(false), is(false));
+
+        assertThrows(CoercingParseValueException.class, () -> AppSyncScalars.AWS_BOOLEAN.getCoercing().parseValue("true"));
+        assertThrows(CoercingParseValueException.class, () -> AppSyncScalars.AWS_BOOLEAN.getCoercing().parseValue("xyz"));
+        assertThrows(CoercingParseValueException.class, () -> AppSyncScalars.AWS_BOOLEAN.getCoercing().parseValue(1));
+        assertThrows(CoercingParseValueException.class, () -> AppSyncScalars.AWS_BOOLEAN.getCoercing().parseValue(0));
+    }
+
+    @Test
+    void scalar_awsboolean_serialize_rejectsNonBoolean() {
+        assertThat(AppSyncScalars.AWS_BOOLEAN.getCoercing().serialize(true), is(true));
+        assertThat(AppSyncScalars.AWS_BOOLEAN.getCoercing().serialize(false), is(false));
+        assertThat(AppSyncScalars.AWS_BOOLEAN.getCoercing().serialize(null), is(nullValue()));
+
+        assertThrows(CoercingSerializeException.class, () -> AppSyncScalars.AWS_BOOLEAN.getCoercing().serialize("true"));
+        assertThrows(CoercingSerializeException.class, () -> AppSyncScalars.AWS_BOOLEAN.getCoercing().serialize(1));
     }
 }
