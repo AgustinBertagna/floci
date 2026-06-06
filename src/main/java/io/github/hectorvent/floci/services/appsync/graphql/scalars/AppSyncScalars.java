@@ -11,7 +11,6 @@ import graphql.schema.GraphQLScalarType;
 
 import java.math.BigDecimal;
 import java.math.BigInteger;
-import java.net.InetAddress;
 import java.net.URI;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -141,12 +140,15 @@ public final class AppSyncScalars {
         .coercing(new Coercing<Long, Long>() {
             @Override
             public Long serialize(Object dataFetcherResult) {
+                if (dataFetcherResult == null) return null;
                 if (dataFetcherResult instanceof Number n) return n.longValue();
                 return Long.parseLong(dataFetcherResult.toString());
             }
             @Override
             public Long parseValue(Object input) {
-                long val = ((Number) input).longValue();
+                long val;
+                if (input instanceof Number n) val = n.longValue();
+                else val = Long.parseLong(input.toString());
                 if (val < 0 || val > 32503680000L)
                     throw new CoercingParseValueException("AWSTimestamp out of range: " + val);
                 return val;
@@ -235,6 +237,11 @@ public final class AppSyncScalars {
         })
         .build();
 
+    private static final Pattern IPV4_PATTERN = Pattern.compile(
+        "^(?:(?:25[0-5]|2[0-4]\\d|[01]?\\d\\d?)\\.){3}(?:25[0-5]|2[0-4]\\d|[01]?\\d\\d?)$");
+    private static final Pattern IPV6_PATTERN = Pattern.compile(
+        "^[0-9a-fA-F:]+$");
+
     public static final GraphQLScalarType AWS_IP_ADDRESS = GraphQLScalarType.newScalar()
         .name("AWSIPAddress")
         .description("An IPv4 or IPv6 address")
@@ -246,9 +253,7 @@ public final class AppSyncScalars {
             @Override
             public String parseValue(Object input) {
                 String str = input.toString();
-                try {
-                    InetAddress.getByName(str);
-                } catch (Exception e) {
+                if (!IPV4_PATTERN.matcher(str).matches() && !IPV6_PATTERN.matcher(str).matches()) {
                     throw new CoercingParseValueException("Invalid AWSIPAddress: " + str);
                 }
                 return str;
@@ -267,18 +272,19 @@ public final class AppSyncScalars {
         .coercing(new Coercing<Boolean, Boolean>() {
             @Override
             public Boolean serialize(Object dataFetcherResult) {
+                if (dataFetcherResult == null) return null;
                 if (dataFetcherResult instanceof Boolean b) return b;
-                return Boolean.valueOf(dataFetcherResult.toString());
+                throw new CoercingSerializeException("AWSBoolean cannot serialize non-boolean value: " + dataFetcherResult.getClass().getSimpleName());
             }
             @Override
             public Boolean parseValue(Object input) {
                 if (input instanceof Boolean b) return b;
-                return Boolean.valueOf(input.toString());
+                throw new CoercingParseValueException("AWSBoolean cannot parse non-boolean value: " + input);
             }
             @Override
             public Boolean parseLiteral(Object input) {
                 if (input instanceof graphql.language.BooleanValue bv) return bv.isValue();
-                return null;
+                throw new CoercingParseLiteralException("AWSBoolean must be a boolean literal");
             }
         })
         .build();
@@ -289,6 +295,7 @@ public final class AppSyncScalars {
         .coercing(new Coercing<Long, Long>() {
             @Override
             public Long serialize(Object dataFetcherResult) {
+                if (dataFetcherResult == null) return null;
                 if (dataFetcherResult instanceof Number n) return n.longValue();
                 return Long.parseLong(dataFetcherResult.toString());
             }
@@ -311,6 +318,7 @@ public final class AppSyncScalars {
         .coercing(new Coercing<Integer, Integer>() {
             @Override
             public Integer serialize(Object dataFetcherResult) {
+                if (dataFetcherResult == null) return null;
                 if (dataFetcherResult instanceof Number n) return n.intValue();
                 return Integer.parseInt(dataFetcherResult.toString());
             }
@@ -359,6 +367,7 @@ public final class AppSyncScalars {
         .coercing(new Coercing<Double, Double>() {
             @Override
             public Double serialize(Object dataFetcherResult) {
+                if (dataFetcherResult == null) return null;
                 if (dataFetcherResult instanceof Number n) return n.doubleValue();
                 return Double.parseDouble(dataFetcherResult.toString());
             }
