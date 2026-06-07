@@ -1668,7 +1668,7 @@ class AppSyncIntegrationTest {
                 }
                 """.formatted(apiId))
         .when()
-            .post("/v1/domainnames/" + domainName + "/apis")
+            .post("/v1/domainnames/" + domainName + "/apiassociation")
         .then()
             .statusCode(200)
             .body("apiAssociation.apiId", equalTo(apiId))
@@ -1681,22 +1681,10 @@ class AppSyncIntegrationTest {
         given()
             .header("Authorization", AUTH)
         .when()
-            .get("/v1/domainnames/" + domainName + "/apis")
+            .get("/v1/domainnames/" + domainName + "/apiassociation")
         .then()
             .statusCode(200)
             .body("graphqlApi.apiId", equalTo(apiId));
-    }
-
-    @Test
-    @Order(305)
-    void listApiAssociations() {
-        given()
-            .header("Authorization", AUTH)
-        .when()
-            .get("/v1/apis/" + apiId + "/domainnames")
-        .then()
-            .statusCode(200)
-            .body("apiAssociations", hasSize(greaterThanOrEqualTo(1)));
     }
 
     @Test
@@ -1705,7 +1693,7 @@ class AppSyncIntegrationTest {
         given()
             .header("Authorization", AUTH)
         .when()
-            .delete("/v1/domainnames/" + domainName + "/apis")
+            .delete("/v1/domainnames/" + domainName + "/apiassociation")
         .then()
             .statusCode(204);
     }
@@ -1761,7 +1749,7 @@ class AppSyncIntegrationTest {
                 }
                 """)
         .when()
-            .post("/v1/domainnames/" + tempDomain + "/apis")
+            .post("/v1/domainnames/" + tempDomain + "/apiassociation")
         .then()
             .statusCode(404);
 
@@ -1786,7 +1774,7 @@ class AppSyncIntegrationTest {
                 }
                 """)
         .when()
-            .post("/v1/apis/" + apiId + "/channelnamespaces")
+            .post("/v2/apis/" + apiId + "/channelNamespaces")
         .then()
             .statusCode(200)
             .body("channelNamespace.name", equalTo("my-channels"))
@@ -1800,7 +1788,7 @@ class AppSyncIntegrationTest {
         given()
             .header("Authorization", AUTH)
         .when()
-            .get("/v1/apis/" + apiId + "/channelnamespaces/" + channelNsName)
+            .get("/v2/apis/" + apiId + "/channelNamespaces/" + channelNsName)
         .then()
             .statusCode(200)
             .body("channelNamespace.name", equalTo("my-channels"));
@@ -1812,7 +1800,7 @@ class AppSyncIntegrationTest {
         given()
             .header("Authorization", AUTH)
         .when()
-            .get("/v1/apis/" + apiId + "/channelnamespaces")
+            .get("/v2/apis/" + apiId + "/channelNamespaces")
         .then()
             .statusCode(200)
             .body("channelNamespaces", hasSize(greaterThanOrEqualTo(1)));
@@ -1824,22 +1812,9 @@ class AppSyncIntegrationTest {
         given()
             .header("Authorization", AUTH)
         .when()
-            .delete("/v1/apis/" + apiId + "/channelnamespaces/" + channelNsName)
+            .delete("/v2/apis/" + apiId + "/channelNamespaces/" + channelNsName)
         .then()
             .statusCode(204);
-    }
-
-    // ── Phase 2: Enhanced Metrics ────────────────────────────────────────────
-
-    @Test
-    @Order(500)
-    void getEnhancedMetricsConfig() {
-        given()
-            .header("Authorization", AUTH)
-        .when()
-            .get("/v1/apis/" + apiId + "/enhancedmetrics")
-        .then()
-            .statusCode(200);
     }
 
     // ── Phase 2: Schema Registry ─────────────────────────────────────────────
@@ -2092,7 +2067,7 @@ class AppSyncIntegrationTest {
 
     @Test
     @Order(610)
-    void createMergedApiAssociation() {
+    void associateSourceGraphqlApi() {
         // Create source API
         String sourceApiId = given()
             .header("Authorization", AUTH)
@@ -2117,7 +2092,7 @@ class AppSyncIntegrationTest {
                 }
                 """.formatted(sourceApiId))
         .when()
-            .post("/v1/apis/" + apiId + "/apiassociations")
+            .post("/v1/mergedApis/" + apiId + "/sourceApiAssociations")
         .then()
             .statusCode(200)
             .body("apiAssociation.apiId", equalTo(apiId))
@@ -2130,7 +2105,7 @@ class AppSyncIntegrationTest {
 
     @Test
     @Order(611)
-    void getMergedApiAssociation() {
+    void getSourceApiAssociation() {
         String sourceApiId = given()
             .header("Authorization", AUTH)
             .contentType("application/json")
@@ -2150,7 +2125,7 @@ class AppSyncIntegrationTest {
                 { "sourceApiId": "%s" }
                 """.formatted(sourceApiId))
         .when()
-            .post("/v1/apis/" + apiId + "/apiassociations")
+            .post("/v1/mergedApis/" + apiId + "/sourceApiAssociations")
         .then()
             .statusCode(200)
             .extract().path("apiAssociation.associationId");
@@ -2158,7 +2133,7 @@ class AppSyncIntegrationTest {
         given()
             .header("Authorization", AUTH)
         .when()
-            .get("/v1/apis/" + apiId + "/apiassociations/" + assocId)
+            .get("/v1/mergedApis/" + apiId + "/sourceApiAssociations/" + assocId)
         .then()
             .statusCode(200)
             .body("apiAssociation.associationId", equalTo(assocId));
@@ -2168,7 +2143,7 @@ class AppSyncIntegrationTest {
 
     @Test
     @Order(612)
-    void listMergedApiAssociations() {
+    void listSourceApiAssociations() {
         String sourceApiId = given()
             .header("Authorization", AUTH)
             .contentType("application/json")
@@ -2188,24 +2163,24 @@ class AppSyncIntegrationTest {
                 { "sourceApiId": "%s" }
                 """.formatted(sourceApiId))
         .when()
-            .post("/v1/apis/" + apiId + "/apiassociations")
+            .post("/v1/mergedApis/" + apiId + "/sourceApiAssociations")
         .then()
             .statusCode(200);
 
         given()
             .header("Authorization", AUTH)
         .when()
-            .get("/v1/apis/" + apiId + "/apiassociations")
+            .get("/v1/apis/" + apiId + "/sourceApiAssociations")
         .then()
             .statusCode(200)
-            .body("apiAssociations", hasSize(greaterThanOrEqualTo(1)));
+            .body("sourceApiAssociations", hasSize(greaterThanOrEqualTo(1)));
 
         given().header("Authorization", AUTH).delete("/v1/apis/" + sourceApiId).then().statusCode(204);
     }
 
     @Test
     @Order(613)
-    void deleteMergedApiAssociation() {
+    void deleteSourceApiAssociation() {
         String sourceApiId = given()
             .header("Authorization", AUTH)
             .contentType("application/json")
@@ -2225,7 +2200,7 @@ class AppSyncIntegrationTest {
                 { "sourceApiId": "%s" }
                 """.formatted(sourceApiId))
         .when()
-            .post("/v1/apis/" + apiId + "/apiassociations")
+            .post("/v1/mergedApis/" + apiId + "/sourceApiAssociations")
         .then()
             .statusCode(200)
             .extract().path("apiAssociation.associationId");
@@ -2233,7 +2208,7 @@ class AppSyncIntegrationTest {
         given()
             .header("Authorization", AUTH)
         .when()
-            .delete("/v1/apis/" + apiId + "/apiassociations/" + assocId)
+            .delete("/v1/mergedApis/" + apiId + "/sourceApiAssociations/" + assocId)
         .then()
             .statusCode(204);
 
@@ -2388,7 +2363,7 @@ class AppSyncIntegrationTest {
                 { "apiId": "%s" }
                 """.formatted(tempApiId))
         .when()
-            .post("/v1/domainnames/" + tempDomain + "/apis")
+            .post("/v1/domainnames/" + tempDomain + "/apiassociation")
         .then()
             .statusCode(200);
 
@@ -2439,7 +2414,7 @@ class AppSyncIntegrationTest {
                 { "apiId": "%s" }
                 """.formatted(apiId))
         .when()
-            .post("/v1/domainnames/" + tempDomain + "/apis")
+            .post("/v1/domainnames/" + tempDomain + "/apiassociation")
         .then()
             .statusCode(200);
 
