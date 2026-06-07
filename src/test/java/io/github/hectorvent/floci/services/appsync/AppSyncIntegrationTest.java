@@ -1684,7 +1684,7 @@ class AppSyncIntegrationTest {
             .get("/v1/domainnames/" + domainName + "/apiassociation")
         .then()
             .statusCode(200)
-            .body("graphqlApi.apiId", equalTo(apiId));
+            .body("apiAssociation.apiId", equalTo(apiId));
     }
 
     @Test
@@ -2095,10 +2095,10 @@ class AppSyncIntegrationTest {
             .post("/v1/mergedApis/" + apiId + "/sourceApiAssociations")
         .then()
             .statusCode(200)
-            .body("apiAssociation.apiId", equalTo(apiId))
-            .body("apiAssociation.sourceApiId", equalTo(sourceApiId))
-            .body("apiAssociation.status", equalTo("MERGED"))
-            .body("apiAssociation.associationId", notNullValue());
+            .body("sourceApiAssociation.mergedApiId", equalTo(apiId))
+            .body("sourceApiAssociation.sourceApiId", equalTo(sourceApiId))
+            .body("sourceApiAssociation.sourceApiAssociationStatus", equalTo("MERGED"))
+            .body("sourceApiAssociation.associationId", notNullValue());
 
         given().header("Authorization", AUTH).delete("/v1/apis/" + sourceApiId).then().statusCode(204);
     }
@@ -2128,7 +2128,7 @@ class AppSyncIntegrationTest {
             .post("/v1/mergedApis/" + apiId + "/sourceApiAssociations")
         .then()
             .statusCode(200)
-            .extract().path("apiAssociation.associationId");
+            .extract().path("sourceApiAssociation.associationId");
 
         given()
             .header("Authorization", AUTH)
@@ -2136,7 +2136,7 @@ class AppSyncIntegrationTest {
             .get("/v1/mergedApis/" + apiId + "/sourceApiAssociations/" + assocId)
         .then()
             .statusCode(200)
-            .body("apiAssociation.associationId", equalTo(assocId));
+            .body("sourceApiAssociation.associationId", equalTo(assocId));
 
         given().header("Authorization", AUTH).delete("/v1/apis/" + sourceApiId).then().statusCode(204);
     }
@@ -2173,7 +2173,7 @@ class AppSyncIntegrationTest {
             .get("/v1/apis/" + apiId + "/sourceApiAssociations")
         .then()
             .statusCode(200)
-            .body("sourceApiAssociations", hasSize(greaterThanOrEqualTo(1)));
+            .body("sourceApiAssociationSummaries", hasSize(greaterThanOrEqualTo(1)));
 
         given().header("Authorization", AUTH).delete("/v1/apis/" + sourceApiId).then().statusCode(204);
     }
@@ -2203,14 +2203,167 @@ class AppSyncIntegrationTest {
             .post("/v1/mergedApis/" + apiId + "/sourceApiAssociations")
         .then()
             .statusCode(200)
-            .extract().path("apiAssociation.associationId");
+            .extract().path("sourceApiAssociation.associationId");
 
         given()
             .header("Authorization", AUTH)
         .when()
             .delete("/v1/mergedApis/" + apiId + "/sourceApiAssociations/" + assocId)
         .then()
-            .statusCode(204);
+            .statusCode(200)
+            .body("sourceApiAssociationStatus", equalTo("DELETION_SCHEDULED"));
+
+        given().header("Authorization", AUTH).delete("/v1/apis/" + sourceApiId).then().statusCode(204);
+    }
+
+    // ── Phase 2: New endpoint coverage ────────────────────────────────
+
+    @Test
+    @Order(614)
+    void updateDomainName() {
+        String testDomain = given()
+            .header("Authorization", AUTH)
+            .contentType("application/json")
+            .body("""
+                {
+                  "domainName": "update-test.example.com",
+                  "certificateArn": "arn:aws:acm:us-east-1:000000000000:certificate/update"
+                }
+                """)
+        .when()
+            .post("/v1/domainnames")
+        .then()
+            .statusCode(200)
+            .extract().path("domainNameConfig.domainName");
+
+        given()
+            .header("Authorization", AUTH)
+            .contentType("application/json")
+            .body("""
+                { "description": "updated description" }
+                """)
+        .when()
+            .post("/v1/domainnames/" + testDomain)
+        .then()
+            .statusCode(200)
+            .body("domainNameConfig.domainName", equalTo(testDomain))
+            .body("domainNameConfig.description", equalTo("updated description"));
+
+        given().header("Authorization", AUTH).delete("/v1/domainnames/" + testDomain).then().statusCode(204);
+    }
+
+    @Test
+    @Order(615)
+    void associateMergedGraphqlApi() {
+        String sourceApiId = given()
+            .header("Authorization", AUTH)
+            .contentType("application/json")
+            .body("""
+                { "name": "merged-source-v2", "authenticationType": "API_KEY" }
+                """)
+        .when()
+            .post("/v1/apis")
+        .then()
+            .statusCode(200)
+            .extract().path("graphqlApi.apiId");
+
+        given()
+            .header("Authorization", AUTH)
+            .contentType("application/json")
+            .body("""
+                {
+                  "mergedApiIdentifier": "%s",
+                  "description": "merged test"
+                }
+                """.formatted(apiId))
+        .when()
+            .post("/v1/sourceApis/" + sourceApiId + "/mergedApiAssociations")
+        .then()
+            .statusCode(200)
+            .body("sourceApiAssociation.sourceApiId", equalTo(sourceApiId))
+            .body("sourceApiAssociation.mergedApiId", equalTo(apiId))
+            .body("sourceApiAssociation.sourceApiAssociationStatus", equalTo("MERGED"));
+
+        given().header("Authorization", AUTH).delete("/v1/apis/" + sourceApiId).then().statusCode(204);
+    }
+
+    @Test
+    @Order(616)
+    void updateSourceApiAssociation() {
+        String sourceApiId = given()
+            .header("Authorization", AUTH)
+            .contentType("application/json")
+            .body("""
+                { "name": "update-source", "authenticationType": "API_KEY" }
+                """)
+        .when()
+            .post("/v1/apis")
+        .then()
+            .statusCode(200)
+            .extract().path("graphqlApi.apiId");
+
+        String assocId = given()
+            .header("Authorization", AUTH)
+            .contentType("application/json")
+            .body("""
+                { "sourceApiId": "%s" }
+                """.formatted(sourceApiId))
+        .when()
+            .post("/v1/mergedApis/" + apiId + "/sourceApiAssociations")
+        .then()
+            .statusCode(200)
+            .extract().path("sourceApiAssociation.associationId");
+
+        given()
+            .header("Authorization", AUTH)
+            .contentType("application/json")
+            .body("""
+                { "description": "updated assoc" }
+                """)
+        .when()
+            .post("/v1/mergedApis/" + apiId + "/sourceApiAssociations/" + assocId)
+        .then()
+            .statusCode(200)
+            .body("sourceApiAssociation.description", equalTo("updated assoc"))
+            .body("sourceApiAssociation.associationId", equalTo(assocId));
+
+        given().header("Authorization", AUTH).delete("/v1/apis/" + sourceApiId).then().statusCode(204);
+    }
+
+    @Test
+    @Order(617)
+    void disassociateMergedGraphqlApi() {
+        String sourceApiId = given()
+            .header("Authorization", AUTH)
+            .contentType("application/json")
+            .body("""
+                { "name": "disassoc-source", "authenticationType": "API_KEY" }
+                """)
+        .when()
+            .post("/v1/apis")
+        .then()
+            .statusCode(200)
+            .extract().path("graphqlApi.apiId");
+
+        String assocId = given()
+            .header("Authorization", AUTH)
+            .contentType("application/json")
+            .body("""
+                { "mergedApiIdentifier": "%s" }
+                """.formatted(apiId))
+        .when()
+            .post("/v1/sourceApis/" + sourceApiId + "/mergedApiAssociations")
+        .then()
+            .statusCode(200)
+            .extract().path("sourceApiAssociation.associationId");
+
+        given()
+            .header("Authorization", AUTH)
+        .when()
+            .delete("/v1/sourceApis/" + sourceApiId + "/mergedApiAssociations/" + assocId)
+        .then()
+            .statusCode(200)
+            .body("sourceApiAssociationStatus", equalTo("DELETION_SCHEDULED"));
 
         given().header("Authorization", AUTH).delete("/v1/apis/" + sourceApiId).then().statusCode(204);
     }
