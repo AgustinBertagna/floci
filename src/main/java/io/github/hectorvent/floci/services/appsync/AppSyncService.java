@@ -31,7 +31,7 @@ public class AppSyncService {
     private final StorageBackend<String, DomainName> domainStore;
     private final StorageBackend<String, String> associationStore;
     private final StorageBackend<String, ChannelNamespace> channelNamespaceStore;
-    private final StorageBackend<String, ApiAssociation> mergedApiAssociationStore;
+    private final StorageBackend<String, SourceApiAssociation> mergedApiAssociationStore;
     private final RegionResolver regionResolver;
     private final SchemaRegistry schemaRegistry;
     private final ObjectMapper objectMapper;
@@ -665,7 +665,7 @@ public class AppSyncService {
         domainStore.delete(domainName);
     }
 
-    public void associateApi(String domainName, String apiId) {
+    public ApiAssociation associateApi(String domainName, String apiId) {
         getDomainName(domainName);
         getGraphqlApi(apiId);
         if (associationStore.get(domainName).isPresent()) {
@@ -673,19 +673,24 @@ public class AppSyncService {
                 "Domain name already associated with an API", 409);
         }
         associationStore.put(domainName, apiId);
+        ApiAssociation assoc = new ApiAssociation();
+        assoc.setApiId(apiId);
+        assoc.setDomainName(domainName);
+        assoc.setAssociationStatus("SUCCESS");
+        assoc.setDeploymentDetail("Successfully associated");
+        return assoc;
     }
 
-    public String getAssociatedApiId(String domainName) {
+    public ApiAssociation getApiAssociation(String domainName) {
         getDomainName(domainName);
-        return associationStore.get(domainName).orElse(null);
-    }
-
-    public GraphqlApi getAssociatedApi(String domainName) {
-        String apiId = getAssociatedApiId(domainName);
-        if (apiId == null) {
-            throw new AwsException("NotFoundException", "No API associated with domain: " + domainName, 404);
-        }
-        return getGraphqlApi(apiId);
+        String apiId = associationStore.get(domainName)
+                .orElseThrow(() -> new AwsException("NotFoundException",
+                    "No API associated with domain: " + domainName, 404));
+        ApiAssociation assoc = new ApiAssociation();
+        assoc.setDomainName(domainName);
+        assoc.setApiId(apiId);
+        assoc.setAssociationStatus("SUCCESS");
+        return assoc;
     }
 
     public void disassociateApi(String domainName) {
@@ -710,6 +715,11 @@ public class AppSyncService {
         ns.setName(name);
         ns.setApiId(apiId);
         ns.setDescription((String) request.get("description"));
+        ns.setChannelNamespaceArn(regionResolver.buildArn("appsync", regionResolver.getDefaultRegion(),
+            "apis/" + apiId + "/channelNamespaces/" + name));
+        ns.setCodeHandlers((String) request.get("codeHandlers"));
+        ns.setCreated(System.currentTimeMillis());
+        ns.setLastModified(System.currentTimeMillis());
         channelNamespaceStore.put(nsKey, ns);
         return ns;
     }
@@ -723,6 +733,8 @@ public class AppSyncService {
     public ChannelNamespace updateChannelNamespace(String apiId, String name, Map<String, Object> request) {
         ChannelNamespace existing = getChannelNamespace(apiId, name);
         if (request.containsKey("description")) existing.setDescription((String) request.get("description"));
+        if (request.containsKey("codeHandlers")) existing.setCodeHandlers((String) request.get("codeHandlers"));
+        existing.setLastModified(System.currentTimeMillis());
         channelNamespaceStore.put(apiKey(apiId, name), existing);
         return existing;
     }
@@ -738,63 +750,125 @@ public class AppSyncService {
 
     // ──────────────────────────── Merged API Associations ─────────────────
 
-    public ApiAssociation createMergedApiAssociation(String sourceApiIdentifier, Map<String, Object> request, String region) {
+    public SourceApiAssociation createMergedApiAssociation(String sourceApiIdentifier, Map<String, Object> request, String region) {
         getGraphqlApi(sourceApiIdentifier);
-        String mergedApiId = (String) request.get("mergedApiId");
-        if (mergedApiId == null || mergedApiId.isBlank()) {
-            throw new AwsException("BadRequestException", "A merged API ID is required", 400);
+        String mergedApiIdentifier = (String) request.getOrDefault("mergedApiIdentifier", request.get("mergedApiId"));
+        if (mergedApiIdentifier == null || mergedApiIdentifier.isBlank()) {
+            throw new AwsException("BadRequestException", "A merged API identifier is required", 400);
         }
-        getGraphqlApi(mergedApiId);
-        ApiAssociation assoc = new ApiAssociation();
+        getGraphqlApi(mergedApiIdentifier);
+        SourceApiAssociation assoc = new SourceApiAssociation();
         assoc.setAssociationId(generateShortId());
-        assoc.setApiId(mergedApiId);
+        assoc.setAssociationArn(regionResolver.buildArn("appsync", region,
+            "sourceApis/" + sourceApiIdentifier + "/mergedApiAssociations/" + generateShortId()));
+        assoc.setMergedApiId(mergedApiIdentifier);
+        assoc.setMergedApiArn(regionResolver.buildArn("appsync", region, "apis/" + mergedApiIdentifier));
         assoc.setSourceApiId(sourceApiIdentifier);
         assoc.setSourceApiArn(regionResolver.buildArn("appsync", region, "apis/" + sourceApiIdentifier));
         assoc.setDescription((String) request.get("description"));
-        assoc.setStatus("MERGED");
+        assoc.setSourceApiAssociationStatus("MERGED");
+        SourceApiAssociationConfig config = new SourceApiAssociationConfig();
+        String mergeType = (String) request.getOrDefault("mergeType", "MERGE");
+        config.setMergeType(mergeType);
+        assoc.setSourceApiAssociationConfig(config);
         mergedApiAssociationStore.put(assoc.getAssociationId(), assoc);
         return assoc;
     }
 
-    public ApiAssociation createSourceApiAssociation(String mergedApiIdentifier, Map<String, Object> request, String region) {
+    public SourceApiAssociation createSourceApiAssociation(String mergedApiIdentifier, Map<String, Object> request, String region) {
         getGraphqlApi(mergedApiIdentifier);
-        String sourceApiId = (String) request.get("sourceApiId");
+        String sourceApiId = (String) request.getOrDefault("sourceApiId", request.get("sourceApiIdentifier"));
         if (sourceApiId == null || sourceApiId.isBlank()) {
             throw new AwsException("BadRequestException", "A source API ID is required", 400);
         }
         getGraphqlApi(sourceApiId);
-        ApiAssociation assoc = new ApiAssociation();
+        SourceApiAssociation assoc = new SourceApiAssociation();
         assoc.setAssociationId(generateShortId());
-        assoc.setApiId(mergedApiIdentifier);
+        assoc.setAssociationArn(regionResolver.buildArn("appsync", region,
+            "mergedApis/" + mergedApiIdentifier + "/sourceApiAssociations/" + generateShortId()));
+        assoc.setMergedApiId(mergedApiIdentifier);
+        assoc.setMergedApiArn(regionResolver.buildArn("appsync", region, "apis/" + mergedApiIdentifier));
         assoc.setSourceApiId(sourceApiId);
         assoc.setSourceApiArn(regionResolver.buildArn("appsync", region, "apis/" + sourceApiId));
         assoc.setDescription((String) request.get("description"));
-        assoc.setStatus("MERGED");
+        assoc.setSourceApiAssociationStatus("MERGED");
+        SourceApiAssociationConfig config = new SourceApiAssociationConfig();
+        String mergeType = (String) request.getOrDefault("mergeType", "MERGE");
+        config.setMergeType(mergeType);
+        assoc.setSourceApiAssociationConfig(config);
         mergedApiAssociationStore.put(assoc.getAssociationId(), assoc);
         return assoc;
     }
 
-    public ApiAssociation getSourceApiAssociation(String mergedApiIdentifier, String associationId) {
-        ApiAssociation assoc = mergedApiAssociationStore.get(associationId)
+    public SourceApiAssociation getSourceApiAssociation(String mergedApiIdentifier, String associationId) {
+        SourceApiAssociation assoc = mergedApiAssociationStore.get(associationId)
                 .orElseThrow(() -> new AwsException("NotFoundException",
                         "Source API association not found: " + associationId, 404));
-        if (!mergedApiIdentifier.equals(assoc.getApiId())) {
+        if (!mergedApiIdentifier.equals(assoc.getMergedApiId())) {
             throw new AwsException("NotFoundException",
                     "Source API association not found: " + associationId, 404);
         }
         return assoc;
     }
 
-    public Page<ApiAssociation> listSourceApiAssociations(String apiId, Integer maxResults, String nextToken) {
-        List<ApiAssociation> filtered = mergedApiAssociationStore.scan(k -> true).stream()
-                .filter(a -> apiId.equals(a.getApiId()))
+    public SourceApiAssociation updateSourceApiAssociation(String mergedApiIdentifier, String associationId,
+                                                          Map<String, Object> request) {
+        SourceApiAssociation assoc = getSourceApiAssociation(mergedApiIdentifier, associationId);
+        if (request.containsKey("description")) {
+            assoc.setDescription((String) request.get("description"));
+        }
+        Object configObj = request.get("sourceApiAssociationConfig");
+        if (configObj instanceof Map<?, ?> configMap) {
+            SourceApiAssociationConfig config = assoc.getSourceApiAssociationConfig();
+            if (config == null) {
+                config = new SourceApiAssociationConfig();
+            }
+            Object mergeType = configMap.get("mergeType");
+            if (mergeType != null) {
+                config.setMergeType((String) mergeType);
+            }
+            assoc.setSourceApiAssociationConfig(config);
+        }
+        mergedApiAssociationStore.put(associationId, assoc);
+        return assoc;
+    }
+
+    public Page<SourceApiAssociationSummary> listSourceApiAssociations(String apiId, Integer maxResults, String nextToken) {
+        List<SourceApiAssociationSummary> summaries = mergedApiAssociationStore.scan(k -> true).stream()
+                .filter(a -> apiId.equals(a.getMergedApiId()) || apiId.equals(a.getSourceApiId()))
+                .map(this::toSummary)
                 .toList();
-        return paginate(filtered, nextToken, maxResults);
+        return paginate(summaries, nextToken, maxResults);
     }
 
     public void deleteSourceApiAssociation(String mergedApiIdentifier, String associationId) {
         getSourceApiAssociation(mergedApiIdentifier, associationId);
         mergedApiAssociationStore.delete(associationId);
+    }
+
+    public SourceApiAssociation deleteMergedApiAssociation(String sourceApiIdentifier, String associationId) {
+        SourceApiAssociation assoc = mergedApiAssociationStore.get(associationId)
+                .orElseThrow(() -> new AwsException("NotFoundException",
+                        "Source API association not found: " + associationId, 404));
+        if (!sourceApiIdentifier.equals(assoc.getSourceApiId())) {
+            throw new AwsException("NotFoundException",
+                    "Source API association not found: " + associationId, 404);
+        }
+        mergedApiAssociationStore.delete(associationId);
+        assoc.setSourceApiAssociationStatus("DELETION_SCHEDULED");
+        return assoc;
+    }
+
+    private SourceApiAssociationSummary toSummary(SourceApiAssociation assoc) {
+        SourceApiAssociationSummary summary = new SourceApiAssociationSummary();
+        summary.setAssociationArn(assoc.getAssociationArn());
+        summary.setAssociationId(assoc.getAssociationId());
+        summary.setDescription(assoc.getDescription());
+        summary.setMergedApiArn(assoc.getMergedApiArn());
+        summary.setMergedApiId(assoc.getMergedApiId());
+        summary.setSourceApiArn(assoc.getSourceApiArn());
+        summary.setSourceApiId(assoc.getSourceApiId());
+        return summary;
     }
 
     // ──────────────────────────── Helpers ────────────────────────────
