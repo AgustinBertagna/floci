@@ -8,28 +8,20 @@ import io.quarkus.runtime.annotations.RegisterForReflection;
 @JsonIgnoreProperties(ignoreUnknown = true)
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public class ApiAssociation {
-    private String associationId;
     private String apiId;
-    private String sourceApiId;
-    private String sourceApiArn;
-    private String description;
-    private String status = "MERGED";
-
-    public String getAssociationId() { return associationId; }
-    public void setAssociationId(String associationId) { this.associationId = associationId; }
+    private String associationStatus;
+    private String deploymentDetail;
+    private String domainName;
 
     public String getApiId() { return apiId; }
     public void setApiId(String apiId) { this.apiId = apiId; }
 
-    public String getSourceApiId() { return sourceApiId; }
-    public void setSourceApiId(String sourceApiId) { this.sourceApiId = sourceApiId; }
+    public String getAssociationStatus() { return associationStatus; }
+    public void setAssociationStatus(String associationStatus) { this.associationStatus = associationStatus; }
 
-    public String getSourceApiArn() { return sourceApiArn; }
-    public void setSourceApiArn(String sourceApiArn) { this.sourceApiArn = sourceApiArn; }
+    public String getDeploymentDetail() { return deploymentDetail; }
+    public void setDeploymentDetail(String deploymentDetail) { this.deploymentDetail = deploymentDetail; }
 
-    public String getDescription() { return description; }
-    public void setDescription(String description) { this.description = description; }
-
-    public String getStatus() { return status; }
-    public void setStatus(String status) { this.status = status; }
+    public String getDomainName() { return domainName; }
+    public void setDomainName(String domainName) { this.domainName = domainName; }
 }
