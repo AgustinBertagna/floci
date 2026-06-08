@@ -266,38 +266,43 @@ class DynamoDbUtilTest {
 
     @Test
     void toStringJson() {
-        Map<String, String> result = dynamoDb.toStringJson("hello");
-        assertThat(result, hasEntry("S", "hello"));
+        String result = dynamoDb.toStringJson("hello");
+        assertThat(result, containsString("\"S\""));
+        assertThat(result, containsString("hello"));
     }
 
     @Test
     void toNumberJson() {
-        Map<String, String> result = dynamoDb.toNumberJson(42);
-        assertThat(result, hasEntry("N", "42"));
+        String result = dynamoDb.toNumberJson(42);
+        assertThat(result, containsString("\"N\""));
+        assertThat(result, containsString("42"));
     }
 
     @Test
     void toBooleanJson() {
-        Map<String, String> result = dynamoDb.toBooleanJson(true);
-        assertThat(result, hasEntry("BOOL", "true"));
+        String result = dynamoDb.toBooleanJson(true);
+        assertThat(result, containsString("\"BOOL\""));
+        assertThat(result, containsString("true"));
     }
 
     @Test
     void toNullJson() {
-        Map<String, String> result = dynamoDb.toNullJson();
-        assertThat(result, hasEntry("NULL", "true"));
+        String result = dynamoDb.toNullJson();
+        assertThat(result, containsString("\"NULL\""));
+        assertThat(result, containsString("true"));
     }
 
     @Test
     void toListJson() {
-        Map<String, Object> result = dynamoDb.toListJson(List.of("a"));
-        assertThat(result, hasKey("L"));
+        String result = dynamoDb.toListJson(List.of("a"));
+        assertThat(result, containsString("\"L\""));
     }
 
     @Test
     void toMapJson() {
-        Map<String, Object> result = dynamoDb.toMapJson(Map.of("k", "v"));
-        assertThat(result, hasKey("M"));
+        String result = dynamoDb.toMapJson(Map.of("k", "v"));
+        assertThat(result, containsString("\"M\""));
+        assertThat(result, containsString("k"));
     }
 
     @Test
@@ -308,25 +313,25 @@ class DynamoDbUtilTest {
 
     @Test
     void toMapValuesJson() {
-        Map<String, Object> result = dynamoDb.toMapValuesJson(Map.of("k", "v"));
-        assertThat(result, hasKey("M"));
+        String result = dynamoDb.toMapValuesJson(Map.of("k", "v"));
+        assertThat(result, containsString("\"M\""));
     }
 
     @Test
     void toStringSetJson() {
-        Map<String, Object> result = dynamoDb.toStringSetJson(List.of("a"));
-        assertThat(result, hasKey("SS"));
+        String result = dynamoDb.toStringSetJson(List.of("a"));
+        assertThat(result, containsString("\"SS\""));
     }
 
     @Test
     void toNumberSetJson() {
-        Map<String, Object> result = dynamoDb.toNumberSetJson(List.of(1));
-        assertThat(result, hasKey("NS"));
+        String result = dynamoDb.toNumberSetJson(List.of(1));
+        assertThat(result, containsString("\"NS\""));
     }
 
     @Test
     void toBinarySetJson() {
-        Map<String, Object> result = dynamoDb.toBinarySetJson(List.of("a"));
-        assertThat(result, hasKey("BS"));
+        String result = dynamoDb.toBinarySetJson(List.of("a"));
+        assertThat(result, containsString("\"BS\""));
     }
 }
