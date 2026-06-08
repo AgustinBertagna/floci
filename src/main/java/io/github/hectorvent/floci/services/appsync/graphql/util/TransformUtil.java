@@ -15,21 +15,9 @@ public class TransformUtil {
         this.objectMapper = objectMapper;
     }
 
-    @SuppressWarnings("unchecked")
     public Map<String, Object> toDynamoDBFilterExpression(Object input) {
-        if (input == null) {
-            return Collections.emptyMap();
-        }
-        Map<String, Object> source;
-        if (input instanceof Map<?, ?> map) {
-            source = (Map<String, Object>) map;
-        } else if (input instanceof String s) {
-            try {
-                source = objectMapper.readValue(s, Map.class);
-            } catch (Exception e) {
-                return Collections.emptyMap();
-            }
-        } else {
+        Map<String, Object> source = parseInput(input);
+        if (source.isEmpty()) {
             return Collections.emptyMap();
         }
 
@@ -46,60 +34,46 @@ public class TransformUtil {
         return result;
     }
 
-    @SuppressWarnings("unchecked")
     public Map<String, Object> toElasticsearchQueryDSL(Object input) {
-        if (input == null) {
-            return Collections.emptyMap();
-        }
-        if (input instanceof Map<?, ?> map) {
-            return (Map<String, Object>) map;
-        }
-        if (input instanceof String s) {
-            try {
-                return objectMapper.readValue(s, Map.class);
-            } catch (Exception e) {
-                return Collections.emptyMap();
-            }
-        }
-        return Collections.emptyMap();
+        return parseInput(input);
     }
 
-    @SuppressWarnings("unchecked")
     public Map<String, Object> toSubscriptionFilter(Object input) {
-        if (input == null) {
-            return Collections.emptyMap();
-        }
-        if (input instanceof Map<?, ?> map) {
-            return (Map<String, Object>) map;
-        }
-        if (input instanceof String s) {
-            try {
-                return objectMapper.readValue(s, Map.class);
-            } catch (Exception e) {
-                return Collections.emptyMap();
-            }
-        }
-        return Collections.emptyMap();
+        return parseInput(input);
     }
 
-    @SuppressWarnings("unchecked")
     public Map<String, Object> toSubscriptionFilter(Object input, List<String> filterKeys) {
-        Map<String, Object> result = toSubscriptionFilter(input);
-        Map<String, Object> mutableResult = new HashMap<>(result);
+        Map<String, Object> result = new HashMap<>(toSubscriptionFilter(input));
         if (filterKeys != null && !filterKeys.isEmpty()) {
-            mutableResult.put("filterKeys", filterKeys);
+            result.put("filterKeys", filterKeys);
         }
-        return mutableResult;
+        return result;
     }
 
-    @SuppressWarnings("unchecked")
     public Map<String, Object> toSubscriptionFilter(Object input, List<String> filterKeys,
                                                      Map<String, String> headerOverrides) {
-        Map<String, Object> result = toSubscriptionFilter(input, filterKeys);
-        Map<String, Object> mutableResult = new HashMap<>(result);
+        Map<String, Object> result = new HashMap<>(toSubscriptionFilter(input, filterKeys));
         if (headerOverrides != null && !headerOverrides.isEmpty()) {
-            mutableResult.put("headerOverrides", headerOverrides);
+            result.put("headerOverrides", headerOverrides);
         }
-        return mutableResult;
+        return result;
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> parseInput(Object input) {
+        if (input == null) {
+            return Collections.emptyMap();
+        }
+        if (input instanceof Map<?, ?> map) {
+            return (Map<String, Object>) map;
+        }
+        if (input instanceof String s) {
+            try {
+                return objectMapper.readValue(s, Map.class);
+            } catch (Exception e) {
+                return Collections.emptyMap();
+            }
+        }
+        return Collections.emptyMap();
     }
 }

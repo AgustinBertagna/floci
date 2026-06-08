@@ -112,7 +112,7 @@ public class AppSyncUtil {
     }
 
     public String qr(String s) {
-        return "";
+        return quiet(s);
     }
 
     public boolean matches(String pattern, String value) {
@@ -221,15 +221,11 @@ public class AppSyncUtil {
     }
 
     public void validate(boolean condition, String message) {
-        if (!condition) {
-            throw new VtlErrorSignal(message, "UnknownError", null, null);
-        }
+        validate(condition, message, "UnknownError");
     }
 
     public void validate(boolean condition, String message, String errorType) {
-        if (!condition) {
-            throw new VtlErrorSignal(message, errorType, null, null);
-        }
+        validate(condition, message, errorType, null);
     }
 
     public void validate(boolean condition, String message, String errorType, Object data) {

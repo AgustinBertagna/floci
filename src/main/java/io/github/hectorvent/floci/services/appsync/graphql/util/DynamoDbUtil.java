@@ -45,53 +45,47 @@ public class DynamoDbUtil {
     }
 
     public String toDynamoDBJson(Object value) {
-        try {
-            return objectMapper.writeValueAsString(toDynamoDB(value));
-        } catch (JsonProcessingException e) {
-            return "{}";
-        }
+        return toJson(toDynamoDB(value));
     }
 
     public Map<String, Object> toString(String value) {
         return Collections.singletonMap("S", value);
     }
 
-    public Map<String, String> toStringJson(String value) {
-        return Collections.singletonMap("S", value);
+    public String toStringJson(String value) {
+        return toJson(toString(value));
     }
 
     public Map<String, Object> toNumber(Number value) {
         return Collections.singletonMap("N", value.toString());
     }
 
-    public Map<String, String> toNumberJson(Number value) {
-        return Collections.singletonMap("N", value.toString());
+    public String toNumberJson(Number value) {
+        return toJson(toNumber(value));
     }
 
     public Map<String, Object> toBinary(String value) {
-        String encoded = Base64.getEncoder().encodeToString(value.getBytes(StandardCharsets.UTF_8));
-        return Collections.singletonMap("B", encoded);
+        return Collections.singletonMap("B", base64Encode(value));
     }
 
-    public Map<String, String> toBinaryJson(String value) {
-        String encoded = Base64.getEncoder().encodeToString(value.getBytes(StandardCharsets.UTF_8));
-        return Collections.singletonMap("B", encoded);
+    public String toBinaryJson(String value) {
+        return toJson(toBinary(value));
     }
 
     public Map<String, Object> toBoolean(Boolean value) {
         return Collections.singletonMap("BOOL", value);
     }
 
-    public Map<String, String> toBooleanJson(Boolean value) {
-        return Collections.singletonMap("BOOL", value.toString());
+    public String toBooleanJson(Boolean value) {
+        return toJson(toBoolean(value));
     }
 
     public Map<String, Object> toNull() {
         return Collections.singletonMap("NULL", true);
     }
 
-    public Map<String, String> toNullJson() {
-        return Collections.singletonMap("NULL", "true");
+    public String toNullJson() {
+        return toJson(toNull());
     }
 
     public Map<String, Object> toList(List<?> value) {
@@ -102,8 +96,8 @@ public class DynamoDbUtil {
         return Collections.singletonMap("L", converted);
     }
 
-    public Map<String, Object> toListJson(List<?> value) {
-        return toList(value);
+    public String toListJson(List<?> value) {
+        return toJson(toList(value));
     }
 
     public Map<String, Object> toMap(Map<String, Object> value) {
@@ -114,24 +108,24 @@ public class DynamoDbUtil {
         return Collections.singletonMap("M", converted);
     }
 
-    public Map<String, Object> toMapJson(Map<String, Object> value) {
-        return toMap(value);
+    public String toMapJson(Map<String, Object> value) {
+        return toJson(toMap(value));
     }
 
     public Map<String, Object> toMapValues(Map<String, Object> value) {
         return toMap(value);
     }
 
-    public Map<String, Object> toMapValuesJson(Map<String, Object> value) {
-        return toMap(value);
+    public String toMapValuesJson(Map<String, Object> value) {
+        return toJson(toMapValues(value));
     }
 
     public Map<String, Object> toStringSet(List<String> value) {
         return Collections.singletonMap("SS", new ArrayList<>(value));
     }
 
-    public Map<String, Object> toStringSetJson(List<String> value) {
-        return toStringSet(value);
+    public String toStringSetJson(List<String> value) {
+        return toJson(toStringSet(value));
     }
 
     public Map<String, Object> toNumberSet(List<? extends Number> value) {
@@ -142,19 +136,31 @@ public class DynamoDbUtil {
         return Collections.singletonMap("NS", strings);
     }
 
-    public Map<String, Object> toNumberSetJson(List<? extends Number> value) {
-        return toNumberSet(value);
+    public String toNumberSetJson(List<? extends Number> value) {
+        return toJson(toNumberSet(value));
     }
 
     public Map<String, Object> toBinarySet(List<String> value) {
         List<String> encoded = new ArrayList<>(value.size());
         for (String s : value) {
-            encoded.add(Base64.getEncoder().encodeToString(s.getBytes(StandardCharsets.UTF_8)));
+            encoded.add(base64Encode(s));
         }
         return Collections.singletonMap("BS", encoded);
     }
 
-    public Map<String, Object> toBinarySetJson(List<String> value) {
-        return toBinarySet(value);
+    public String toBinarySetJson(List<String> value) {
+        return toJson(toBinarySet(value));
+    }
+
+    private String base64Encode(String value) {
+        return Base64.getEncoder().encodeToString(value.getBytes(StandardCharsets.UTF_8));
+    }
+
+    private String toJson(Map<String, Object> map) {
+        try {
+            return objectMapper.writeValueAsString(map);
+        } catch (JsonProcessingException e) {
+            return "{}";
+        }
     }
 }
